@@ -167,5 +167,6 @@ final class Updater: ObservableObject {
         p.arguments = ["-c", script, "swap", String(ProcessInfo.processInfo.processIdentifier), current.path, newApp.path]
         try p.run()
         NSApp.terminate(nil)
+        exit(0)   // when run from the command line there's no running app to terminate
     }
 }

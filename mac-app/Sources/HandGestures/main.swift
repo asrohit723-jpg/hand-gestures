@@ -181,6 +181,18 @@ if CommandLine.arguments.contains("--check-update") {
     }
     RunLoop.main.run()
 }
+if CommandLine.arguments.contains("--install-update") {
+    let updater = Updater.shared
+    updater.check { release in
+        guard release != nil else { print("nothing to install: \(updater.status)"); exit(1) }
+        var watcher: AnyCancellable?
+        watcher = updater.$status.sink { status in
+            if case .failed(let message) = status { print("failed: \(message)"); watcher?.cancel(); exit(1) }
+        }
+        updater.install()
+    }
+    RunLoop.main.run()
+}
 if let i = CommandLine.arguments.firstIndex(of: "--verify-update"), i + 2 < CommandLine.arguments.count {
     do {
         let app = try Updater.unpackAndVerify(URL(fileURLWithPath: CommandLine.arguments[i + 1]),
