@@ -4,6 +4,33 @@
 open it from Spotlight or with ⌃⌥H. Gestures are set in its Settings window. The source is in
 `mac-app/`.
 
+### Gestures (recommended set)
+
+The app copies what people already know: the trackpad and Vision Pro.
+
+| Gesture | Does |
+|---|---|
+| ✋✋ Both palms open, held still | Start / stop listening |
+| ✋ Relaxed hand or point, move | Move the pointer |
+| 🤏 Pinch | Click |
+| 🤏 Pinch twice | Double-click |
+| 🤏 Pinch and hold still | Right-click |
+| 🤏 Pinch and move | Drag (files, windows, across screens) |
+| 🤏🤏 Both hands pinch, apart / together | Zoom in / out (or resize the window) |
+| ✌️ Two fingers, move up / down | Scroll |
+| ✌️ Two fingers, swipe right / left | Back / forward |
+| ✋ Palm swipe left / right | Next / previous desktop |
+| ✋ Palm swipe up / down | Mission Control / app windows |
+| 👍 Thumbs up, hold | Dictation on / off (Wispr) |
+| 🤘 Rock sign, hold | Paste last dictation + Enter |
+| ✊ Fist, hold | Escape |
+| 3️⃣ Three fingers, hold | Play / pause |
+| 🤙 Shaka, hold | Switch to last app |
+| 📸 L shape, hold | Screenshot an area |
+| 👌 OK sign, move up / down | Volume |
+
+Everything except the pointer and pinch can be changed in Settings › Gestures.
+
 ### Updating
 
 Push a change under `mac-app/` to `main`. GitHub Actions

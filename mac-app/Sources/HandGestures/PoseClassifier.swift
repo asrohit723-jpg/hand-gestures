@@ -66,7 +66,11 @@ enum PoseClassifier {
         if !(i || m || r || k) {
             let thumbDir = p[4] - p[2]
             if thumb && simd_length(thumbDir) > 0 && thumbDir.y / simd_length(thumbDir) < -0.7 { return .thumbsUp }
-            if !thumb { return .fist }
+            // A real fist has every fingertip tucked in, no further from the wrist than
+            // its knuckle. A relaxed, half-curled hand doesn't, so it stays "none" and
+            // can move the pointer without firing the fist's action.
+            let tucked = fingers.allSatisfy { dist(p[$0.tip], p[0]) <= 1.05 * dist(p[$0.mcp], p[0]) }
+            if !thumb && tucked { return .fist }
         }
         return .none
     }

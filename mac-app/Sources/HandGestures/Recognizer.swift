@@ -12,55 +12,56 @@ struct Hand {
 enum GestureEvent: Equatable {
     case wake, sleep
     case gesture(GestureRule)  // a hold or swipe with a one-off action
-    case scroll(Double)        // pixels, positive = up
+    case aim(CGPoint)          // 0...1 position the pointer follows
+    case pinchDown             // fingers closed: hold the pointer where it was aimed
+    case click(Int)            // released without moving: 1 = click, 2 = double-click
+    case rightClick            // held still: more options
+    case dragStart, dragEnd    // moved while pinched: mouse down … mouse up; .aim moves it between
+    case scroll(Double)        // pixels; positive scrolls up (the content moves down)
     case volume(Int)           // +1 / -1
-    case pointer(CGPoint)      // 0...1 palm position
-    case pointerOn, pointerOff
-    case grabStart, grabEnd    // pinch closed / opened: mouse down / up
-    case grabMove(CGVector)    // hand moved while pinched, 0...1 of the frame
     case zoomStart, zoomEnd    // both hands pinched / released
     case zoom(Int)             // +1 expand, -1 shrink, one step at a time
     case scale(Double)         // hands' spread relative to when the pinch began
 }
 
-/// Turns a stream of per-frame poses into gesture events, following the user's
-/// gesture list: holds, swipes, scrolling, volume and pointer movement.
-/// Pure logic, so it is testable.
+/// Turns a stream of per-frame hands into gesture events.
+///
+/// Built in, like a trackpad: a relaxed or pointing hand aims the pointer; a pinch
+/// clicks, twice double-clicks, held still right-clicks, moved drags; both hands
+/// pinching zoom. Everything else follows the user's gesture list (holds, swipes,
+/// scroll, volume). Pure logic, so it is testable.
 final class Recognizer {
     var settings: Settings { didSet { rebuild() } }
 
     let stillTolerance = 0.04
-    let poseDebounce = 0.12
+    let poseDebounce = 0.1
     let swipeWindow = 0.5
     let swipeCooldown = 0.8
-    let moveDeadzone = 0.04
     let volumeStep = 0.06
-    let pinchRelease = 0.5     // palm lengths: a pinch opens past this (it closes at 0.3)
-    let zoomStep = 1.15        // spread ratio per zoom step
+    let scrollNoise = 0.002     // frame fraction per frame below which a resting hand doesn't scroll
+    let pinchClose = 0.3        // palm lengths: fingers count as touching below this…
+    let pinchRelease = 0.5      // …and as apart again above this
+    let dragThreshold = 0.025   // frame fraction the pinch travels before it becomes a drag
+    let doubleClickWindow = 0.45
+    let zoomStep = 1.15         // spread ratio per zoom step
+
+    /// Shapes that aim the pointer: a relaxed hand, pointing, or about to pinch.
+    static let aimPoses: Set<Pose> = [.none, .point, .pinch]
 
     private(set) var awake = false
-    private(set) var pointerMode = false
     private(set) var pose: Pose = .none
-    private(set) var grabbing = false
+    private(set) var pinched = false
+    private(set) var dragging = false
     private(set) var zooming = false
 
     // Lookups built from the gesture list; the first rule wins when two clash.
     private var wakePose: Pose = .openPalm
-    private var pointerPose: Pose?
     private var holds: [Pose: GestureRule] = [:]
     private var swipes: [Pose: [Motion: GestureRule]] = [:]
     private var scrollPose: Pose?
     private var volumePose: Pose?
 
-    // Both-hands start / stop: when both hands began showing the shape, where, and
-    // whether this showing already fired (it must be lowered before it fires again).
-    private var bothSince: Double?
-    private var bothLastSeen = -1.0
-    private var bothAnchors: (CGPoint, CGPoint)?
-    private var bothFired = false
-
     private var lastSeen: Double?
-    private var lastT: Double?
     private var rawPose: Pose?
     private var rawSince = 0.0
     private var holdStart = 0.0
@@ -68,12 +69,25 @@ final class Recognizer {
     private var holdFired = false
     private var history: [(t: Double, p: CGPoint)] = []
     private var cooldownUntil = 0.0
-    private var scrollAnchor: Double?
+    private var scrollLastY: Double?
     private var volumeAnchor: Double?
-    private var grabLast: CGPoint?
-    /// A pinch that already grabbed (or zoomed) can't grab again until the hand changes shape.
-    private var pinchSpent = false
-    private var pinchOpenFrames = 0
+
+    // Pinch.
+    private var closeFrames = 0
+    private var openFrames = 0
+    private var pinchStartT = 0.0
+    private var pinchStartPoint = CGPoint.zero
+    private var rightClicked = false
+    private var pinchSpent = false          // after a zoom, fingers must open before the next click
+    private var lastClick: (t: Double, p: CGPoint)?
+
+    // Both-hands start / stop.
+    private var bothSince: Double?
+    private var bothLastSeen = -1.0
+    private var bothAnchors: (CGPoint, CGPoint)?
+    private var bothFired = false
+
+    // Two-hand zoom.
     private var zoomCandidateSince: Double?
     private var zoomStartSpread = 0.0
     private var zoomBase = 0.0
@@ -85,13 +99,12 @@ final class Recognizer {
 
     private func rebuild() {
         wakePose = settings.startStopRule.pose
-        pointerPose = nil; holds = [:]; swipes = [:]; scrollPose = nil; volumePose = nil
+        holds = [:]; swipes = [:]; scrollPose = nil; volumePose = nil
         var seen = Set<String>()
         for r in settings.gestures where r.action != .none {
             guard seen.insert("\(r.pose.rawValue).\(r.motion.rawValue)").inserted else { continue }
             switch (r.motion, r.action) {
             case (.hold, .startStop): break
-            case (.hold, .pointer): pointerPose = r.pose
             case (.hold, _) where r.action.isDiscrete: holds[r.pose] = r
             case (.moveUpDown, .scroll): scrollPose = r.pose
             case (.moveUpDown, .volume): volumePose = r.pose
@@ -101,14 +114,15 @@ final class Recognizer {
         }
     }
 
+    // MARK: Helpers
+
     private func setPose(_ p: Pose, _ t: Double, _ hand: Hand?) {
         pose = p
         holdStart = t
         holdAnchor = hand?.center
         holdFired = false
-        pinchSpent = false
         history.removeAll()
-        scrollAnchor = (hand != nil && p == scrollPose) ? Double(hand!.tip.y) : nil
+        scrollLastY = nil
         volumeAnchor = (hand != nil && p == volumePose) ? Double(hand!.center.y) : nil
     }
 
@@ -123,9 +137,14 @@ final class Recognizer {
         return t - holdStart
     }
 
-    private func endGrab(_ events: inout [GestureEvent]) {
-        if grabbing { grabbing = false; grabLast = nil; events.append(.grabEnd) }
-        pinchSpent = true
+    private static func distance(_ a: CGPoint, _ b: CGPoint) -> Double {
+        hypot(Double(a.x - b.x), Double(a.y - b.y))
+    }
+
+    /// Lets go of a pinch without clicking (hand lost, zoom started, going to sleep).
+    private func cancelPinch(_ events: inout [GestureEvent]) {
+        if dragging { events.append(.dragEnd) }
+        pinched = false; dragging = false; closeFrames = 0
     }
 
     private func endZoom(_ events: inout [GestureEvent]) {
@@ -133,10 +152,11 @@ final class Recognizer {
         zoomCandidateSince = nil
     }
 
-    /// True once a pinch has stayed open for two frames (so one noisy frame doesn't drop it).
-    private func pinchOpened(_ hand: Hand) -> Bool {
-        pinchOpenFrames = hand.pinch > pinchRelease ? pinchOpenFrames + 1 : 0
-        return pinchOpenFrames >= 2
+    private func goToSleep(_ events: inout [GestureEvent]) {
+        cancelPinch(&events)
+        endZoom(&events)
+        awake = false
+        events.append(.sleep)
     }
 
     /// True once, when both hands have shown the start / stop shape, still, for the wake time.
@@ -160,22 +180,14 @@ final class Recognizer {
         return true
     }
 
-    private func goToSleep(_ events: inout [GestureEvent]) {
-        endGrab(&events)
-        endZoom(&events)
-        if pointerMode { pointerMode = false; events.append(.pointerOff) }
-        awake = false
-        events.append(.sleep)
-    }
+    // MARK: Update
 
-    /// `other` is a second hand in view, used only for two-hand pinch.
+    /// `other` is a second hand in view, used for both-hands start / stop and zoom.
     func update(t: Double, hand: Hand?, other: Hand? = nil) -> [GestureEvent] {
         var events: [GestureEvent] = []
-        let dt = lastT.map { min(t - $0, 0.2) } ?? 0
-        lastT = t
 
         guard let hand else {
-            endGrab(&events)      // never leave the mouse button held down
+            cancelPinch(&events)      // never leave the mouse button held down
             endZoom(&events)
             if awake, let seen = lastSeen, t - seen > settings.sleepAfterSeconds { goToSleep(&events) }
             if pose != .none { setPose(.none, t, nil) }
@@ -187,6 +199,7 @@ final class Recognizer {
         if hand.pose != rawPose { rawPose = hand.pose; rawSince = t }
         if hand.pose != pose && t - rawSince >= poseDebounce { setPose(hand.pose, t, hand) }
         let held = heldFor(t, hand)
+        if hand.pinch > pinchRelease { pinchSpent = false }
 
         // Start / stop: its shape held still — on both hands, unless set to one.
         if settings.startStopBothHands {
@@ -203,7 +216,7 @@ final class Recognizer {
 
         // Two hands pinching: expand / shrink by pulling apart / pushing together.
         if settings.twoHandZoom, let other {
-            let spread = hypot(Double(hand.pinchPoint.x - other.pinchPoint.x), Double(hand.pinchPoint.y - other.pinchPoint.y))
+            let spread = Self.distance(hand.pinchPoint, other.pinchPoint)
             if zooming {
                 if hand.pinch < pinchRelease && other.pinch < pinchRelease {
                     if settings.twoHandResizesWindow {
@@ -217,11 +230,11 @@ final class Recognizer {
                 }
                 return events
             }
-            if hand.pose == .pinch && other.pose == .pinch {
+            if hand.pose == .pinch && other.pose == .pinch && hand.pinch < pinchClose && other.pinch < pinchClose {
                 let since = zoomCandidateSince ?? t
                 zoomCandidateSince = since
                 if t - since >= poseDebounce {
-                    endGrab(&events)
+                    cancelPinch(&events)
                     zooming = true
                     zoomStartSpread = spread
                     zoomBase = spread
@@ -235,60 +248,66 @@ final class Recognizer {
             endZoom(&events)
         }
 
-        // Pointer mode: the fingertip drives the cursor; only the toggle works.
-        if pointerMode {
-            if pose == pointerPose && !holdFired && held >= settings.holdSeconds {
-                holdFired = true
-                pointerMode = false
-                events.append(.pointerOff)
-            } else {
-                if settings.pinchGrab {
-                    if grabbing { if pinchOpened(hand) { endGrab(&events) } }
-                    else if pose == .pinch && !pinchSpent { grabbing = true; pinchOpenFrames = 0; events.append(.grabStart) }
+        // Pinch: click, double-click, right-click (held still) or drag (moved).
+        if settings.pinchGrab {
+            if pinched {
+                openFrames = hand.pinch > pinchRelease ? openFrames + 1 : 0
+                if openFrames >= 2 {                    // fingers apart: let go
+                    pinched = false
+                    holdFired = true
+                    if dragging {
+                        dragging = false
+                        events.append(.dragEnd)
+                    } else if !rightClicked {
+                        let double = lastClick.map {
+                            t - $0.t < doubleClickWindow && Self.distance($0.p, pinchStartPoint) < 0.05
+                        } ?? false
+                        events.append(.click(double ? 2 : 1))
+                        lastClick = double ? nil : (t, pinchStartPoint)
+                    }
+                    return events
                 }
-                events.append(.pointer(hand.center))
+                if !dragging && !rightClicked {
+                    if Self.distance(hand.pinchPoint, pinchStartPoint) > dragThreshold {
+                        dragging = true
+                        events.append(.dragStart)
+                    } else if t - pinchStartT >= settings.rightClickSeconds {
+                        rightClicked = true
+                        events.append(.rightClick)
+                    }
+                }
+                if dragging { events.append(.aim(hand.pinchPoint)) }
+                return events
             }
-            return events
+            // Fingers closing: two frames in a row of a real pinch (not an OK sign or a fist).
+            // If the other hand is pinching too, it's the start of a two-hand zoom, not a click.
+            let otherPinching = settings.twoHandZoom && other.map { $0.pose == .pinch && $0.pinch < pinchClose } == true
+            closeFrames = (hand.pose == .pinch && hand.pinch < pinchClose && !pinchSpent && !otherPinching) ? closeFrames + 1 : 0
+            if closeFrames >= 2 {
+                pinched = true
+                dragging = false
+                rightClicked = false
+                openFrames = 0
+                closeFrames = 0
+                pinchStartT = t
+                pinchStartPoint = hand.pinchPoint
+                events.append(.pinchDown)
+                return events
+            }
         }
 
-        // Pinch: grab what's under the cursor and drag it with the hand.
-        if settings.pinchGrab {
-            if grabbing {
-                if pinchOpened(hand) {
-                    endGrab(&events)
-                    holdFired = true
-                } else {
-                    if let last = grabLast {
-                        events.append(.grabMove(CGVector(dx: hand.center.x - last.x, dy: hand.center.y - last.y)))
-                    }
-                    grabLast = hand.center
-                }
-                return events
-            }
-            if pose == .pinch && !pinchSpent {
-                grabbing = true
-                grabLast = hand.center
-                pinchOpenFrames = 0
-                events.append(.grabStart)
-                return events
-            }
+        // Aim: a relaxed or pointing hand moves the pointer.
+        if settings.handPointer && Self.aimPoses.contains(pose) && Self.aimPoses.contains(hand.pose) {
+            events.append(.aim(hand.pinchPoint))
         }
 
         if t < cooldownUntil { return events }
 
         // Holds. The start / stop shape waits for its own, longer hold above.
-        if !holdFired && held >= settings.holdSeconds && pose != wakePose {
-            if pose == pointerPose {
-                holdFired = true
-                pointerMode = true
-                events.append(.pointerOn)
-                return events
-            }
-            if let rule = holds[pose] {
-                holdFired = true
-                events.append(.gesture(rule))
-                return events
-            }
+        if !holdFired && held >= settings.holdSeconds && pose != wakePose, let rule = holds[pose] {
+            holdFired = true
+            events.append(.gesture(rule))
+            return events
         }
 
         // Swipes.
@@ -311,14 +330,17 @@ final class Recognizer {
             }
         }
 
-        // Scroll: hold the shape, then move the hand up or down from where you started.
-        if pose == scrollPose, let anchor = scrollAnchor {
-            let offset = anchor - Double(hand.tip.y)          // > 0 when the hand is higher
-            let excess = abs(offset) - moveDeadzone
-            if excess > 0 {
-                var px = excess * settings.scrollSpeed * dt * (offset > 0 ? 1 : -1)
-                if settings.invertScroll { px = -px }
-                if px != 0 { events.append(.scroll(px)) }
+        // Scroll, like two fingers on a trackpad: the page follows the hand up and down.
+        if pose == scrollPose {
+            let y = Double(hand.center.y)
+            if let last = scrollLastY {
+                // Slow movement builds up until it passes the noise of a resting hand.
+                if abs(y - last) > scrollNoise {
+                    events.append(.scroll((y - last) * settings.scrollSpeed * (settings.invertScroll ? -1 : 1)))
+                    scrollLastY = y
+                }
+            } else {
+                scrollLastY = y
             }
         }
 

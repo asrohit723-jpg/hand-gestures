@@ -8,7 +8,6 @@ struct FrameOutput {
     var pose: Pose
     var handVisible: Bool
     var awake: Bool
-    var pointerMode: Bool
     var joints: [[CGPoint]]    // per hand, mirrored 0...1, origin top-left, for the preview overlay
     var preview: CGImage?
 }
@@ -77,7 +76,19 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             if session.canAddOutput(output) { session.addOutput(output) }
         }
         session.commitConfiguration()
+        Self.lockFrameRate(device)
         queue.async { self.session.startRunning() }
+    }
+
+    /// Runs the camera at its highest frame rate and keeps it there. Left alone, macOS
+    /// halves the rate in dim light to brighten the picture, which makes gestures lag.
+    private static func lockFrameRate(_ device: AVCaptureDevice) {
+        guard let best = device.activeFormat.videoSupportedFrameRateRanges.map(\.maxFrameRate).max(), best > 0,
+              (try? device.lockForConfiguration()) != nil else { return }
+        let duration = CMTime(value: 1, timescale: CMTimeScale(best.rounded()))
+        device.activeVideoMinFrameDuration = duration
+        device.activeVideoMaxFrameDuration = duration
+        device.unlockForConfiguration()
     }
 
     func stop() {
@@ -101,6 +112,7 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         frameCount += 1
 
         var allJoints: [[CGPoint]] = []
+        var fingertipsSure: [Bool] = []
         let handler = VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up)
         if (try? handler.perform([request])) != nil {
             for obs in request.results ?? [] where obs.confidence > 0.5 {
@@ -111,16 +123,20 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                     guard let p = points[name] else { return CGPoint(x: 1 - wrist.location.x, y: 1 - wrist.location.y) }
                     return CGPoint(x: 1 - p.location.x, y: 1 - p.location.y)
                 })
+                // A shape is only trusted when Vision is sure where every fingertip is;
+                // otherwise a half-hidden finger could read as a different gesture.
+                let tips: [VNHumanHandPoseObservation.JointName] = [.thumbTip, .indexTip, .middleTip, .ringTip, .littleTip]
+                fingertipsSure.append(tips.allSatisfy { (points[$0]?.confidence ?? 0) > 0.3 })
             }
         }
 
         let aspect = width / height
-        var hands: [Hand] = allJoints.map { j in
+        var hands: [Hand] = zip(allJoints, fingertipsSure).map { j, sure in
             let scaled = j.map { SIMD2<Double>(Double($0.x) * aspect, Double($0.y)) }
             let palmIdx = [0, 5, 9, 13, 17]
             let cx = palmIdx.map { Double(j[$0].x) }.reduce(0, +) / 5
             let cy = palmIdx.map { Double(j[$0].y) }.reduce(0, +) / 5
-            return Hand(pose: PoseClassifier.classify(scaled), center: CGPoint(x: cx, y: cy), tip: j[8],
+            return Hand(pose: sure ? PoseClassifier.classify(scaled) : .none, center: CGPoint(x: cx, y: cy), tip: j[8],
                         pinch: PoseClassifier.pinchRatio(scaled),
                         pinchPoint: CGPoint(x: (j[4].x + j[8].x) / 2, y: (j[4].y + j[8].y) / 2))
         }
@@ -143,6 +159,6 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         onFrame?(FrameOutput(events: events, pose: hand == nil ? .none : recognizer.pose,
                              handVisible: hand != nil, awake: recognizer.awake,
-                             pointerMode: recognizer.pointerMode, joints: allJoints, preview: preview))
+                             joints: allJoints, preview: preview))
     }
 }

@@ -139,6 +139,18 @@ struct CheatSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+            if settings.handPointer { row("✋", "Relaxed hand or point · move", "Move the pointer") }
+            if settings.pinchGrab {
+                row("🤏", "Pinch", "Click")
+                row("🤏", "Pinch twice", "Double-click")
+                row("🤏", "Pinch and hold still", "Right-click")
+                row("🤏", "Pinch and move", "Drag")
+            }
+            if settings.twoHandZoom {
+                row("🤏🤏", "Both hands pinch · apart / together",
+                    settings.twoHandResizesWindow ? "Resize window" : "Zoom in / out")
+            }
+            Divider().padding(.vertical, 2)
             ForEach(settings.gestures.filter { $0.action != .none }) { rule in
                 HStack(spacing: 8) {
                     Text(rule.action == .startStop && settings.startStopBothHands ? rule.pose.emoji + rule.pose.emoji : rule.pose.emoji)
@@ -148,11 +160,6 @@ struct CheatSheet: View {
                     Text(rule.actionTitle).multilineTextAlignment(.trailing)
                 }
                 .font(.caption)
-            }
-            if settings.pinchGrab { row("🤏", "Pinch · move", "Grab and drag (quick pinch = click)") }
-            if settings.twoHandZoom {
-                row("🤏🤏", "Both hands pinch · apart / together",
-                    settings.twoHandResizesWindow ? "Resize window" : "Zoom in / out")
             }
             if let onEdit {
                 Button(action: onEdit) {
@@ -167,7 +174,7 @@ struct CheatSheet: View {
 
     private func row(_ emoji: String, _ gesture: String, _ action: String) -> some View {
         HStack(spacing: 8) {
-            Text(emoji).frame(width: 22)
+            Text(emoji).fixedSize().frame(minWidth: 22)
             Text(gesture).foregroundStyle(.secondary)
             Spacer(minLength: 8)
             Text(action).multilineTextAlignment(.trailing)

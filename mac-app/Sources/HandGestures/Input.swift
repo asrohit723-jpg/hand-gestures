@@ -25,7 +25,7 @@ enum Input {
         static let equal: CGKeyCode = 24, minus: CGKeyCode = 27
         static let three: CGKeyCode = 20, four: CGKeyCode = 21
         static let rightBracket: CGKeyCode = 30, leftBracket: CGKeyCode = 33
-        static let returnKey: CGKeyCode = 36, tab: CGKeyCode = 48, space: CGKeyCode = 49
+        static let returnKey: CGKeyCode = 36, tab: CGKeyCode = 48, space: CGKeyCode = 49, escape: CGKeyCode = 53
         static let left: CGKeyCode = 123, right: CGKeyCode = 124, down: CGKeyCode = 125, up: CGKeyCode = 126
     }
 
@@ -106,10 +106,21 @@ enum Input {
     static var mouseLocation: CGPoint { CGEvent(source: nil)?.location ?? .zero }
 
     /// Mouse down / dragged / up at a point (global coordinates, origin top-left of the main display).
-    static func mouse(_ type: CGEventType, at p: CGPoint) {
-        guard let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left) else { return }
-        e.setIntegerValueField(.mouseEventClickState, value: 1)
+    static func mouse(_ type: CGEventType, at p: CGPoint, button: CGMouseButton = .left, clicks: Int64 = 1) {
+        guard let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: button) else { return }
+        e.setIntegerValueField(.mouseEventClickState, value: clicks)
         e.post(tap: .cghidEventTap)
+    }
+
+    /// A click; count 2 is the second click of a double-click.
+    static func click(at p: CGPoint, count: Int) {
+        mouse(.leftMouseDown, at: p, clicks: Int64(count))
+        mouse(.leftMouseUp, at: p, clicks: Int64(count))
+    }
+
+    static func rightClick(at p: CGPoint) {
+        mouse(.rightMouseDown, at: p, button: .right)
+        mouse(.rightMouseUp, at: p, button: .right)
     }
 
     /// Every connected display together, so a drag can carry things onto another screen.
@@ -174,6 +185,10 @@ enum ActionRunner {
             } else {
                 return "\(next ? "Next" : "Previous") isn't set up for \(app.isEmpty ? "this app" : app)"
             }
+        case .back: work = { Input.press(Input.Key.leftBracket, [.cmd]) }
+        case .forward: work = { Input.press(Input.Key.rightBracket, [.cmd]) }
+        case .escape: work = { Input.press(Input.Key.escape) }
+        case .enter: work = { Input.press(Input.Key.returnKey) }
         case .nextTab: work = { Input.press(Input.Key.rightBracket, [.shift, .cmd]) }
         case .previousTab: work = { Input.press(Input.Key.leftBracket, [.shift, .cmd]) }
         case .reload: work = { Input.press(Input.Key.r, [.cmd]) }

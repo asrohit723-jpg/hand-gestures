@@ -35,6 +35,59 @@ struct GesturesTab: View {
 
     var body: some View {
         Form {
+            if state.settings.offerRecommended {
+                Section {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "sparkles").font(.title2).foregroundStyle(Color.accentColor)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("A new recommended set is ready").font(.body.weight(.semibold))
+                            Text("It works like the trackpad: two fingers scroll and go back / forward, a whole hand swipes desktops, up for Mission Control, down for the app's windows. You kept your own list, so it hasn't been switched.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            HStack {
+                                Button("Use the recommended set") {
+                                    state.settings.gestures = GestureRule.defaults
+                                    state.settings.offerRecommended = false
+                                }
+                                .buttonStyle(.borderedProminent)
+                                Button("Keep mine") { state.settings.offerRecommended = false }
+                            }
+                            .padding(.top, 2)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
+            Section {
+                PinchRow(emoji: "✋", title: "Hand moves the pointer",
+                         detail: "Hold your hand up, relaxed or pointing, and the pointer follows it, like a mouse. It stops while your hand makes a gesture shape.",
+                         isOn: $state.settings.handPointer)
+                if state.settings.handPointer {
+                    SliderRow(title: "Pointer reach", value: reach, range: 0.3...0.9,
+                              low: "Big arm moves", high: "Small moves", format: nil)
+                    SliderRow(title: "Pointer steadiness", value: $state.settings.pointerSmoothing, range: 0...0.85,
+                              low: "Responsive", high: "Steady", format: nil)
+                }
+                PinchRow(emoji: "🤏", title: "Pinch to click",
+                         detail: "Touch thumb and index: a quick pinch clicks, two quick pinches double-click, pinch and hold still right-clicks, pinch and move drags (pictures, files, windows — even onto another screen).",
+                         isOn: $state.settings.pinchGrab)
+                if state.settings.pinchGrab {
+                    SliderRow(title: "Hold for right-click", value: $state.settings.rightClickSeconds, range: 0.4...1.2,
+                              low: "Quick", high: "Long", format: "%.1f s")
+                }
+                PinchRow(emoji: "🤏🤏", title: "Two-hand pinch to expand",
+                         detail: "Pinch with both hands, then pull them apart to expand or push them together to shrink.",
+                         isOn: $state.settings.twoHandZoom)
+                if state.settings.twoHandZoom {
+                    Picker("Expanding", selection: $state.settings.twoHandResizesWindow) {
+                        Text("Zooms in and out (⌘+ / ⌘−)").tag(false)
+                        Text("Resizes the window under the pointer").tag(true)
+                    }
+                }
+            } header: {
+                Text("Pointer and clicks, like a trackpad")
+            }
+
             Section {
                 ForEach($state.settings.gestures) { $rule in
                     GestureEditorRow(rule: $rule, state: state)
@@ -48,47 +101,32 @@ struct GesturesTab: View {
             } header: {
                 Text("Gestures")
             } footer: {
-                Text("Hold gestures need the shape held still for about \(String(format: "%.1f", state.settings.holdSeconds)) s. Start / stop needs \(state.settings.startStopBothHands ? "both hands" : "the shape") held still for \(String(format: "%.1f", state.settings.wakeSeconds)) s. “Next” and “Previous” switch tabs in browsers, slides in Keynote, PowerPoint and Preview, and skip in QuickTime, IINA and VLC.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section {
-                PinchRow(emoji: "🤏", title: "Pinch to grab",
-                         detail: "Touch thumb and index to press on whatever is under the pointer. Keep pinching and move your hand to drag pictures, files or windows — even onto another screen. Open your fingers to let go. A quick pinch is a click.",
-                         isOn: $state.settings.pinchGrab)
-                if state.settings.pinchGrab {
-                    SliderRow(title: "Drag speed", value: $state.settings.dragSpeed, range: 0.4...3,
-                              low: "Precise", high: "Fast", format: nil)
-                }
-                PinchRow(emoji: "🤏🤏", title: "Two-hand pinch to expand",
-                         detail: "Pinch with both hands, then pull them apart to expand or push them together to shrink.",
-                         isOn: $state.settings.twoHandZoom)
-                if state.settings.twoHandZoom {
-                    Picker("Expanding", selection: $state.settings.twoHandResizesWindow) {
-                        Text("Zooms in and out (⌘+ / ⌘−)").tag(false)
-                        Text("Resizes the window under the pointer").tag(true)
-                    }
-                }
-            } header: {
-                Text("Pinch, like Vision Pro")
-            } footer: {
-                Text("Aim with the trackpad, or turn on the laser pointer so your hand moves the pointer, then pinch.")
+                Text("Hold gestures need the shape held still for about \(String(format: "%.1f", state.settings.holdSeconds)) s. Start / stop needs \(state.settings.startStopBothHands ? "both hands" : "the shape") held still for \(String(format: "%.1f", state.settings.wakeSeconds)) s. Swipe left means next / forward, swipe right means previous / back, like a phone.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 HStack {
-                    Text("Back to the original gestures")
+                    Text("The recommended, trackpad-style set")
                     Spacer()
                     Button("Restore defaults") { confirmReset = true }
-                        .disabled(state.settings.gestures == GestureRule.defaults)
+                        .disabled(GestureRule.sameList(state.settings.gestures, GestureRule.defaults))
                 }
             }
         }
         .formStyle(.grouped)
-        .confirmationDialog("Restore the original gestures?", isPresented: $confirmReset) {
-            Button("Restore defaults", role: .destructive) { state.settings.gestures = GestureRule.defaults }
+        .confirmationDialog("Restore the recommended gestures?", isPresented: $confirmReset) {
+            Button("Restore defaults", role: .destructive) {
+                state.settings.gestures = GestureRule.defaults
+                state.settings.offerRecommended = false
+            }
         } message: {
             Text("Your changes to the gesture list will be replaced.")
         }
+    }
+
+    /// "Pointer reach": the slider grows as the camera area shrinks, so right = smaller arm moves.
+    private var reach: Binding<Double> {
+        Binding(get: { 1.2 - state.settings.pointerArea }, set: { state.settings.pointerArea = 1.2 - $0 })
     }
 
     /// A new line using the first shape not used for "hold still" yet.
@@ -281,8 +319,6 @@ struct FeelTab: View {
                 SliderRow(title: "Scroll speed", value: $state.settings.scrollSpeed, range: 1500...15000,
                           low: "Slow", high: "Fast", format: nil)
                 Toggle("Reverse scroll direction", isOn: $state.settings.invertScroll)
-                SliderRow(title: "Pointer steadiness", value: $state.settings.pointerSmoothing, range: 0...0.85,
-                          low: "Responsive", high: "Steady", format: nil)
                 SliderRow(title: "Stop listening after no hand for", value: $state.settings.sleepAfterSeconds,
                           range: 10...180, low: "10 s", high: "3 min", format: "%.0f s")
             }

@@ -88,11 +88,11 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case startStop, pointer
     case scroll, volume
     case dictation, pasteAndSend
-    case next, previous, nextTab, previousTab, reload
+    case back, forward, next, previous, nextTab, previousTab, reload
     case missionControl, appExpose, desktopNext, desktopPrevious, lastApp, minimize, fullScreen
     case playPause, nextTrack, previousTrack, mute
     case screenshotArea, screenshotScreen
-    case lockScreen, custom
+    case escape, enter, lockScreen, custom
 
     var id: String { rawValue }
 
@@ -100,11 +100,13 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .none: "Nothing"
         case .startStop: "Start / stop listening"
-        case .pointer: "Laser pointer on / off"
+        case .pointer: "Hand pointer on / off"
         case .scroll: "Scroll"
         case .volume: "Volume"
         case .dictation: "Wispr dictation on / off"
         case .pasteAndSend: "Paste last dictation + Enter"
+        case .back: "Back"
+        case .forward: "Forward"
         case .next: "Next (tab, slide or skip)"
         case .previous: "Previous (tab, slide or skip)"
         case .nextTab: "Next tab"
@@ -123,6 +125,8 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .mute: "Mute"
         case .screenshotArea: "Screenshot area to clipboard"
         case .screenshotScreen: "Screenshot screen to clipboard"
+        case .escape: "Escape (cancel, close menu)"
+        case .enter: "Return / Enter"
         case .lockScreen: "Lock screen"
         case .custom: "Keyboard shortcut…"
         }
@@ -137,6 +141,8 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .volume: "speaker.wave.2.fill"
         case .dictation: "mic.fill"
         case .pasteAndSend: "paperplane.fill"
+        case .back: "chevron.backward"
+        case .forward: "chevron.forward"
         case .next: "chevron.right.2"
         case .previous: "chevron.left.2"
         case .nextTab: "arrow.right.square"
@@ -155,22 +161,25 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .mute: "speaker.slash.fill"
         case .screenshotArea: "camera.viewfinder"
         case .screenshotScreen: "camera.fill"
+        case .escape: "escape"
+        case .enter: "return"
         case .lockScreen: "lock.fill"
         case .custom: "keyboard"
         }
     }
 
-    /// Actions that run once (a key press, a media key…), as opposed to the
-    /// built-in modes the recognizer drives itself.
-    var isDiscrete: Bool { ![.startStop, .pointer, .scroll, .volume].contains(self) }
+    /// Actions that run once (a key press, a media key, a switch), as opposed to
+    /// the built-in modes the recognizer drives itself.
+    var isDiscrete: Bool { ![.startStop, .scroll, .volume].contains(self) }
 
     static let discreteGroups: [(String, [ActionKind])] = [
         ("Dictation", [.dictation, .pasteAndSend]),
-        ("Browsing & presenting", [.next, .previous, .nextTab, .previousTab, .reload]),
+        ("Browsing & presenting", [.back, .forward, .next, .previous, .nextTab, .previousTab, .reload]),
         ("Windows & desktops", [.missionControl, .appExpose, .desktopNext, .desktopPrevious, .lastApp, .minimize, .fullScreen]),
         ("Media", [.playPause, .nextTrack, .previousTrack, .mute]),
         ("Capture", [.screenshotArea, .screenshotScreen]),
-        ("Other", [.lockScreen, .custom, .none]),
+        ("Keys", [.escape, .enter, .custom]),
+        ("Other", [.lockScreen, .none]),
     ]
 
     /// The actions that make sense for a movement.
@@ -209,7 +218,31 @@ struct GestureRule: Codable, Equatable, Identifiable {
         action == .custom ? (shortcut?.display ?? "Shortcut not set") : action.title
     }
 
+    /// The recommended set. It follows the trackpad: two fingers scroll and go back /
+    /// forward, a whole hand swipes desktops, up for Mission Control, down for the
+    /// app's windows. Shapes held still are shortcuts. Pointing, clicking and
+    /// dragging are built in (see the pointer settings).
     static let defaults: [GestureRule] = [
+        .init(pose: .openPalm, motion: .hold, action: .startStop),
+        .init(pose: .v, motion: .moveUpDown, action: .scroll),
+        .init(pose: .v, motion: .swipeLeft, action: .forward),
+        .init(pose: .v, motion: .swipeRight, action: .back),
+        .init(pose: .openPalm, motion: .swipeLeft, action: .desktopNext),
+        .init(pose: .openPalm, motion: .swipeRight, action: .desktopPrevious),
+        .init(pose: .openPalm, motion: .swipeUp, action: .missionControl),
+        .init(pose: .openPalm, motion: .swipeDown, action: .appExpose),
+        .init(pose: .thumbsUp, motion: .hold, action: .dictation),
+        .init(pose: .rock, motion: .hold, action: .pasteAndSend),
+        .init(pose: .fist, motion: .hold, action: .escape),
+        .init(pose: .three, motion: .hold, action: .playPause),
+        .init(pose: .shaka, motion: .hold, action: .lastApp),
+        .init(pose: .lShape, motion: .hold, action: .screenshotArea),
+        .init(pose: .ok, motion: .moveUpDown, action: .volume),
+    ]
+
+    /// The first set (before the trackpad-style redesign), kept to recognise
+    /// unchanged lists when upgrading.
+    static let legacyDefaults: [GestureRule] = [
         .init(pose: .openPalm, motion: .hold, action: .startStop),
         .init(pose: .thumbsUp, motion: .hold, action: .dictation),
         .init(pose: .rock, motion: .hold, action: .pasteAndSend),
@@ -226,6 +259,12 @@ struct GestureRule: Codable, Equatable, Identifiable {
         .init(pose: .point, motion: .moveUpDown, action: .scroll),
         .init(pose: .ok, motion: .moveUpDown, action: .volume),
     ]
+
+    /// Same gesture and action, whatever the id.
+    static func sameList(_ a: [GestureRule], _ b: [GestureRule]) -> Bool {
+        a.map { "\($0.pose.rawValue).\($0.motion.rawValue).\($0.action.rawValue)" }
+            == b.map { "\($0.pose.rawValue).\($0.motion.rawValue).\($0.action.rawValue)" }
+    }
 }
 
 struct Settings: Codable, Equatable {
@@ -239,8 +278,13 @@ struct Settings: Codable, Equatable {
     var invertScroll = false
     var pointerSmoothing = 0.35
 
-    /// Pinch thumb and index to press the mouse; move while pinched to drag.
+    /// A relaxed or pointing hand moves the pointer, like a mouse.
+    var handPointer = true
+    /// How much of the camera view maps to the whole screen (smaller = less arm movement).
+    var pointerArea = 0.55
+    /// Pinch to click; pinch twice to double-click; pinch and hold to right-click; pinch and move to drag.
     var pinchGrab = true
+    var rightClickSeconds = 0.6
     var dragSpeed = 1.0
     /// Pinch with both hands and pull apart / push together.
     var twoHandZoom = true
@@ -255,6 +299,11 @@ struct Settings: Codable, Equatable {
     var cameraID: String?
     var startOnLaunch = true
     var onboarded = false
+
+    /// 2 = the trackpad-style gesture set. Older saved settings load as 1.
+    var schemeVersion = 2
+    /// Set when an upgrade kept a customised list: the editor offers the recommended set.
+    var offerRecommended = false
 
     /// The rule that starts and stops listening (there is always exactly one).
     var startStopRule: GestureRule {
@@ -291,6 +340,18 @@ struct Settings: Codable, Equatable {
            let rules = migrate(old, stored), let rulesData = try? encoder.encode(rules) {
             stored["gestures"] = try? JSONSerialization.jsonObject(with: rulesData)
         }
+        // Upgrading to the trackpad-style set: an untouched old list is replaced; a
+        // customised one is kept and the editor offers the new set.
+        if stored["schemeVersion"] == nil {
+            let current = (stored["gestures"]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                .flatMap { try? JSONDecoder().decode([GestureRule].self, from: $0) }
+            if current == nil || GestureRule.sameList(current!, GestureRule.legacyDefaults) {
+                stored["gestures"] = nil
+            } else {
+                stored["offerRecommended"] = true
+            }
+            stored["schemeVersion"] = 2
+        }
         let merged = defaults.merging(stored.filter { defaults[$0.key] != nil }) { _, new in new }
         guard let mergedData = try? JSONSerialization.data(withJSONObject: merged),
               let s = try? JSONDecoder().decode(Settings.self, from: mergedData) else { return Settings() }
@@ -307,7 +368,7 @@ struct Settings: Codable, Equatable {
             "vLeft": (.v, .swipeLeft), "vRight": (.v, .swipeRight),
         ]
         var rules: [GestureRule] = []
-        for d in GestureRule.defaults {
+        for d in GestureRule.legacyDefaults {
             switch d.action {
             case .pointer where stored["pointerEnabled"] as? Bool == false: continue
             case .scroll where stored["scrollEnabled"] as? Bool == false: continue

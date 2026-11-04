@@ -44,7 +44,7 @@ struct CameraPreview: View {
 
     private var badge: some View {
         let (text, colour): (String, Color) =
-            state.pointerMode ? ("Pointer", .orange) : state.awake ? ("Listening", .green) : ("Paused", .gray)
+            state.awake ? ("Listening", .green) : ("Paused", .gray)
         return HStack(spacing: 5) {
             Circle().fill(colour).frame(width: 7, height: 7)
             Text(text).font(.caption2.weight(.semibold))
