@@ -25,8 +25,10 @@ struct CameraPreview: View {
                 } else {
                     ProgressView().controlSize(.small).tint(.white)
                 }
-                if let joints = state.joints, let img = state.preview {
-                    skeleton(joints, in: geo.size, imageAspect: Double(img.width) / Double(img.height))
+                if let img = state.preview {
+                    ForEach(Array((state.joints ?? []).enumerated()), id: \.offset) { _, joints in
+                        skeleton(joints, in: geo.size, imageAspect: Double(img.width) / Double(img.height))
+                    }
                 }
                 VStack {
                     HStack {

@@ -25,7 +25,7 @@ final class AppState: ObservableObject {
     @Published private(set) var lastAction: String?
     @Published private(set) var lastActionSymbol = "hand.raised"
     @Published private(set) var preview: CGImage?
-    @Published private(set) var joints: [CGPoint]?
+    @Published private(set) var joints: [[CGPoint]]?
     @Published private(set) var accessibilityGranted = Input.trusted
     @Published private(set) var cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @Published var errorMessage: String?
@@ -40,6 +40,9 @@ final class AppState: ObservableObject {
     private let hud = HUD()
     private var pendingScroll = 0.0
     private var cursor: CGPoint?
+    private var mouseDown = false
+    private var dragPosition = CGPoint.zero
+    private var dragVelocity = CGVector.zero
     private var permissionTimer: Timer?
 
     private init() {
@@ -101,6 +104,8 @@ final class AppState: ObservableObject {
 
     func stop() {
         pipeline.stop()
+        if mouseDown { Input.mouse(.leftMouseUp, at: dragPosition); mouseDown = false }
+        WindowResizer.end()
         running = false
         awake = false
         pointerMode = false
@@ -177,8 +182,52 @@ final class AppState: ObservableObject {
             let k = settings.pointerSmoothing
             let next = cursor.map { CGPoint(x: $0.x * k + target.x * (1 - k), y: $0.y * k + target.y * (1 - k)) } ?? target
             cursor = next
-            Input.moveCursor(to: next)
+            if mouseDown { dragTo(next) } else { Input.moveCursor(to: next) }
+
+        case .grabStart:
+            if dry { note("🤏  Would grab", symbol: "hand.pinch.fill", tint: .accentColor); return }
+            dragPosition = Input.mouseLocation
+            dragVelocity = .zero
+            Input.mouse(.leftMouseDown, at: dragPosition)
+            mouseDown = true
+        case .grabMove(let v):
+            guard mouseDown else { return }
+            // Hand travel across the middle 60% of the frame = the width of the main screen.
+            let size = Input.mainScreenSize
+            let gain = settings.dragSpeed / 0.6
+            let k = 0.4   // light smoothing so the dragged thing doesn't shake
+            dragVelocity = CGVector(dx: dragVelocity.dx * k + v.dx * size.width * gain * (1 - k),
+                                    dy: dragVelocity.dy * k + v.dy * size.height * gain * (1 - k))
+            dragTo(CGPoint(x: dragPosition.x + dragVelocity.dx, y: dragPosition.y + dragVelocity.dy))
+        case .grabEnd:
+            guard mouseDown else { return }
+            Input.mouse(.leftMouseUp, at: dragPosition)
+            mouseDown = false
+
+        case .zoomStart:
+            if settings.twoHandResizesWindow && !dry {
+                if !WindowResizer.begin(at: Input.mouseLocation) {
+                    note("No window under the pointer to resize", symbol: "macwindow", tint: .secondary)
+                }
+            } else {
+                note(dry ? "🤏🤏  Would zoom" : "Zoom", symbol: "arrow.up.left.and.arrow.down.right", tint: .accentColor)
+            }
+        case .zoom(let step):
+            guard !dry else { return }
+            Input.press(step > 0 ? Input.Key.equal : Input.Key.minus, [.cmd])
+        case .scale(let factor):
+            guard !dry else { return }
+            WindowResizer.scale(factor)
+        case .zoomEnd:
+            WindowResizer.end()
         }
+    }
+
+    /// Moves a held mouse button to a point, kept on the screens.
+    private func dragTo(_ p: CGPoint) {
+        let b = Input.desktopBounds
+        dragPosition = CGPoint(x: min(max(p.x, b.minX), b.maxX - 1), y: min(max(p.y, b.minY), b.maxY - 1))
+        Input.mouse(.leftMouseDragged, at: dragPosition)
     }
 
     /// An on-screen confirmation from outside the gesture pipeline (e.g. the on/off shortcut).

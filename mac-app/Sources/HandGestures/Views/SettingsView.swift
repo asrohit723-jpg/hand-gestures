@@ -52,6 +52,29 @@ struct GesturesTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                PinchRow(emoji: "🤏", title: "Pinch to grab",
+                         detail: "Touch thumb and index to press on whatever is under the pointer. Keep pinching and move your hand to drag pictures, files or windows — even onto another screen. Open your fingers to let go. A quick pinch is a click.",
+                         isOn: $state.settings.pinchGrab)
+                if state.settings.pinchGrab {
+                    SliderRow(title: "Drag speed", value: $state.settings.dragSpeed, range: 0.4...3,
+                              low: "Precise", high: "Fast", format: nil)
+                }
+                PinchRow(emoji: "🤏🤏", title: "Two-hand pinch to expand",
+                         detail: "Pinch with both hands, then pull them apart to expand or push them together to shrink.",
+                         isOn: $state.settings.twoHandZoom)
+                if state.settings.twoHandZoom {
+                    Picker("Expanding", selection: $state.settings.twoHandResizesWindow) {
+                        Text("Zooms in and out (⌘+ / ⌘−)").tag(false)
+                        Text("Resizes the window under the pointer").tag(true)
+                    }
+                }
+            } header: {
+                Text("Pinch, like Vision Pro")
+            } footer: {
+                Text("Aim with the trackpad, or turn on the laser pointer so your hand moves the pointer, then pinch.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 HStack {
                     Text("Back to the original gestures")
                     Spacer()
@@ -73,6 +96,26 @@ struct GesturesTab: View {
         let used = Set(state.settings.gestures.filter { $0.motion == .hold }.map(\.pose))
         let pose = Pose.usable.first { !used.contains($0) } ?? .fist
         return GestureRule(pose: pose, motion: .hold, action: .none)
+    }
+}
+
+struct PinchRow: View {
+    let emoji: String
+    let title: String
+    let detail: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(emoji).font(.title2).fixedSize().frame(minWidth: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Toggle(title, isOn: $isOn).labelsHidden().toggleStyle(.switch)
+        }
+        .padding(.vertical, 2)
     }
 }
 

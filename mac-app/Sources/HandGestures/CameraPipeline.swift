@@ -9,7 +9,7 @@ struct FrameOutput {
     var handVisible: Bool
     var awake: Bool
     var pointerMode: Bool
-    var joints: [CGPoint]?     // mirrored 0...1, origin top-left, for the preview overlay
+    var joints: [[CGPoint]]    // per hand, mirrored 0...1, origin top-left, for the preview overlay
     var preview: CGImage?
 }
 
@@ -20,13 +20,14 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let output = AVCaptureVideoDataOutput()
     private let request: VNDetectHumanHandPoseRequest = {
         let r = VNDetectHumanHandPoseRequest()
-        r.maximumHandCount = 1
+        r.maximumHandCount = 2   // two hands for pinch-to-zoom
         return r
     }()
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private var recognizer: Recognizer
     private let clockStart = CACurrentMediaTime()
     private var frameCount = 0
+    private var lastPrimary: CGPoint?
 
     /// Set from the main thread; read on the camera queue.
     var wantsPreview = false
@@ -99,30 +100,38 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         let t = CACurrentMediaTime() - clockStart
         frameCount += 1
 
-        var joints: [CGPoint]?
+        var allJoints: [[CGPoint]] = []
         let handler = VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up)
-        if (try? handler.perform([request])) != nil,
-           let obs = request.results?.first, obs.confidence > 0.5,
-           let points = try? obs.recognizedPoints(.all),
-           let wrist = points[.wrist], wrist.confidence > 0.3 {
-            // Vision: origin bottom-left. Mirror x so your right is right, flip y.
-            joints = Self.jointOrder.map { name in
-                guard let p = points[name] else { return CGPoint(x: 1 - wrist.location.x, y: 1 - wrist.location.y) }
-                return CGPoint(x: 1 - p.location.x, y: 1 - p.location.y)
+        if (try? handler.perform([request])) != nil {
+            for obs in request.results ?? [] where obs.confidence > 0.5 {
+                guard let points = try? obs.recognizedPoints(.all),
+                      let wrist = points[.wrist], wrist.confidence > 0.3 else { continue }
+                // Vision: origin bottom-left. Mirror x so your right is right, flip y.
+                allJoints.append(Self.jointOrder.map { name in
+                    guard let p = points[name] else { return CGPoint(x: 1 - wrist.location.x, y: 1 - wrist.location.y) }
+                    return CGPoint(x: 1 - p.location.x, y: 1 - p.location.y)
+                })
             }
         }
 
-        var hand: Hand?
-        if let j = joints {
-            let aspect = width / height
+        let aspect = width / height
+        var hands: [Hand] = allJoints.map { j in
             let scaled = j.map { SIMD2<Double>(Double($0.x) * aspect, Double($0.y)) }
             let palmIdx = [0, 5, 9, 13, 17]
             let cx = palmIdx.map { Double(j[$0].x) }.reduce(0, +) / 5
             let cy = palmIdx.map { Double(j[$0].y) }.reduce(0, +) / 5
-            hand = Hand(pose: PoseClassifier.classify(scaled), center: CGPoint(x: cx, y: cy), tip: j[8])
+            return Hand(pose: PoseClassifier.classify(scaled), center: CGPoint(x: cx, y: cy), tip: j[8],
+                        pinch: PoseClassifier.pinchRatio(scaled),
+                        pinchPoint: CGPoint(x: (j[4].x + j[8].x) / 2, y: (j[4].y + j[8].y) / 2))
         }
+        // The hand doing single-hand gestures stays the same one from frame to frame.
+        if hands.count > 1, let last = lastPrimary {
+            hands.sort { hypot($0.center.x - last.x, $0.center.y - last.y) < hypot($1.center.x - last.x, $1.center.y - last.y) }
+        }
+        lastPrimary = hands.first?.center
+        let hand = hands.first
 
-        let events = recognizer.update(t: t, hand: hand)
+        let events = recognizer.update(t: t, hand: hand, other: hands.count > 1 ? hands[1] : nil)
 
         var preview: CGImage?
         if wantsPreview && frameCount % 2 == 0 {
@@ -134,6 +143,6 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         onFrame?(FrameOutput(events: events, pose: hand == nil ? .none : recognizer.pose,
                              handVisible: hand != nil, awake: recognizer.awake,
-                             pointerMode: recognizer.pointerMode, joints: joints, preview: preview))
+                             pointerMode: recognizer.pointerMode, joints: allJoints, preview: preview))
     }
 }

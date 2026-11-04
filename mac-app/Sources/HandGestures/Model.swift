@@ -3,7 +3,7 @@ import Foundation
 
 /// A hand shape recognised in one frame.
 enum Pose: String, Codable, CaseIterable, Identifiable {
-    case openPalm, fist, point, lShape, v, three, rock, shaka, thumbsUp, ok, none
+    case openPalm, fist, point, lShape, v, three, rock, shaka, thumbsUp, ok, pinch, none
 
     var id: String { rawValue }
 
@@ -22,6 +22,7 @@ enum Pose: String, Codable, CaseIterable, Identifiable {
         case .shaka: "🤙"
         case .thumbsUp: "👍"
         case .ok: "👌"
+        case .pinch: "🤏"
         case .none: "·"
         }
     }
@@ -38,6 +39,7 @@ enum Pose: String, Codable, CaseIterable, Identifiable {
         case .shaka: "Shaka"
         case .thumbsUp: "Thumbs up"
         case .ok: "OK sign"
+        case .pinch: "Pinch"
         case .none: "No gesture"
         }
     }
@@ -53,7 +55,8 @@ enum Pose: String, Codable, CaseIterable, Identifiable {
         case .rock: "Index and pinky up"
         case .shaka: "Thumb and pinky out"
         case .thumbsUp: "Thumb up, fingers curled"
-        case .ok: "Thumb and index touching"
+        case .ok: "Thumb and index touching, other fingers up"
+        case .pinch: "Thumb and index touching"
         case .none: ""
         }
     }
@@ -86,7 +89,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case scroll, volume
     case dictation, pasteAndSend
     case next, previous, nextTab, previousTab, reload
-    case missionControl, appExpose, desktopNext, desktopPrevious, lastApp
+    case missionControl, appExpose, desktopNext, desktopPrevious, lastApp, minimize, fullScreen
     case playPause, nextTrack, previousTrack, mute
     case screenshotArea, screenshotScreen
     case lockScreen, custom
@@ -112,6 +115,8 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .desktopNext: "Next desktop"
         case .desktopPrevious: "Previous desktop"
         case .lastApp: "Switch to last app"
+        case .minimize: "Minimize window"
+        case .fullScreen: "Full screen on / off"
         case .playPause: "Play / pause"
         case .nextTrack: "Next track"
         case .previousTrack: "Previous track"
@@ -142,6 +147,8 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .desktopNext: "arrow.right.to.line"
         case .desktopPrevious: "arrow.left.to.line"
         case .lastApp: "arrow.left.arrow.right"
+        case .minimize: "minus.rectangle"
+        case .fullScreen: "arrow.up.left.and.arrow.down.right"
         case .playPause: "playpause.fill"
         case .nextTrack: "forward.fill"
         case .previousTrack: "backward.fill"
@@ -160,7 +167,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     static let discreteGroups: [(String, [ActionKind])] = [
         ("Dictation", [.dictation, .pasteAndSend]),
         ("Browsing & presenting", [.next, .previous, .nextTab, .previousTab, .reload]),
-        ("Windows & desktops", [.missionControl, .appExpose, .desktopNext, .desktopPrevious, .lastApp]),
+        ("Windows & desktops", [.missionControl, .appExpose, .desktopNext, .desktopPrevious, .lastApp, .minimize, .fullScreen]),
         ("Media", [.playPause, .nextTrack, .previousTrack, .mute]),
         ("Capture", [.screenshotArea, .screenshotScreen]),
         ("Other", [.lockScreen, .custom, .none]),
@@ -226,6 +233,13 @@ struct Settings: Codable, Equatable {
     var scrollSpeed = 6000.0
     var invertScroll = false
     var pointerSmoothing = 0.35
+
+    /// Pinch thumb and index to press the mouse; move while pinched to drag.
+    var pinchGrab = true
+    var dragSpeed = 1.0
+    /// Pinch with both hands and pull apart / push together.
+    var twoHandZoom = true
+    var twoHandResizesWindow = false
 
     var sounds = true
     var showHUD = true

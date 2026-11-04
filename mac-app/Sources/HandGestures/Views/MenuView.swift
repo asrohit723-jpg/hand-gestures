@@ -148,6 +148,11 @@ struct CheatSheet: View {
                 }
                 .font(.caption)
             }
+            if settings.pinchGrab { row("🤏", "Pinch · move", "Grab and drag (quick pinch = click)") }
+            if settings.twoHandZoom {
+                row("🤏🤏", "Both hands pinch · apart / together",
+                    settings.twoHandResizesWindow ? "Resize window" : "Zoom in / out")
+            }
             if let onEdit {
                 Button(action: onEdit) {
                     Label("Edit gestures…", systemImage: "pencil")
@@ -157,5 +162,15 @@ struct CheatSheet: View {
                 .padding(.top, 4)
             }
         }
+    }
+
+    private func row(_ emoji: String, _ gesture: String, _ action: String) -> some View {
+        HStack(spacing: 8) {
+            Text(emoji).frame(width: 22)
+            Text(gesture).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(action).multilineTextAlignment(.trailing)
+        }
+        .font(.caption)
     }
 }

@@ -31,6 +31,13 @@ enum PoseClassifier {
         return straight && awayFromLittle && awayFromIndex
     }
 
+    /// Thumb tip to index tip, in palm lengths. Small = pinching.
+    static func pinchRatio(_ p: [P]) -> Double {
+        guard p.count == 21 else { return .infinity }
+        let palm = dist(p[9], p[0])
+        return palm > 1e-6 ? dist(p[4], p[8]) / palm : .infinity
+    }
+
     static func classify(_ p: [P]) -> Pose {
         guard p.count == 21 else { return .none }
         let palm = dist(p[9], p[0])
@@ -39,7 +46,13 @@ enum PoseClassifier {
         let (i, m, r, k) = (ext[0], ext[1], ext[2], ext[3])
         let thumb = thumbExtended(p, palm: palm)
 
-        if dist(p[4], p[8]) < 0.3 * palm && m && r && k { return .ok }
+        // Thumb and index tips touching. With the other fingers up it's an OK sign;
+        // otherwise a pinch, as long as the index reaches out past its knuckle
+        // (in a fist the tips can touch too, but the index is curled into the palm).
+        if pinchRatio(p) < 0.3 {
+            if m && r && k { return .ok }
+            if dist(p[8], p[0]) > dist(p[5], p[0]) { return .pinch }
+        }
         if i && m && r && k { return .openPalm }
         if i && m && r && !k { return .three }
         if i && m && !r && !k { return .v }

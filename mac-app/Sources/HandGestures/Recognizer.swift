@@ -5,6 +5,8 @@ struct Hand {
     var pose: Pose
     var center: CGPoint   // palm centre
     var tip: CGPoint      // index fingertip
+    var pinch: Double = .infinity       // thumb tip to index tip, in palm lengths
+    var pinchPoint: CGPoint = .zero     // between the thumb and index tips
 }
 
 enum GestureEvent: Equatable {
@@ -12,8 +14,13 @@ enum GestureEvent: Equatable {
     case gesture(GestureRule)  // a hold or swipe with a one-off action
     case scroll(Double)        // pixels, positive = up
     case volume(Int)           // +1 / -1
-    case pointer(CGPoint)      // 0...1 fingertip position
+    case pointer(CGPoint)      // 0...1 palm position
     case pointerOn, pointerOff
+    case grabStart, grabEnd    // pinch closed / opened: mouse down / up
+    case grabMove(CGVector)    // hand moved while pinched, 0...1 of the frame
+    case zoomStart, zoomEnd    // both hands pinched / released
+    case zoom(Int)             // +1 expand, -1 shrink, one step at a time
+    case scale(Double)         // hands' spread relative to when the pinch began
 }
 
 /// Turns a stream of per-frame poses into gesture events, following the user's
@@ -28,10 +35,14 @@ final class Recognizer {
     let swipeCooldown = 0.8
     let moveDeadzone = 0.04
     let volumeStep = 0.06
+    let pinchRelease = 0.5     // palm lengths: a pinch opens past this (it closes at 0.3)
+    let zoomStep = 1.15        // spread ratio per zoom step
 
     private(set) var awake = false
     private(set) var pointerMode = false
     private(set) var pose: Pose = .none
+    private(set) var grabbing = false
+    private(set) var zooming = false
 
     // Lookups built from the gesture list; the first rule wins when two clash.
     private var wakePose: Pose = .openPalm
@@ -52,6 +63,13 @@ final class Recognizer {
     private var cooldownUntil = 0.0
     private var scrollAnchor: Double?
     private var volumeAnchor: Double?
+    private var grabLast: CGPoint?
+    /// A pinch that already grabbed (or zoomed) can't grab again until the hand changes shape.
+    private var pinchSpent = false
+    private var pinchOpenFrames = 0
+    private var zoomCandidateSince: Double?
+    private var zoomStartSpread = 0.0
+    private var zoomBase = 0.0
 
     init(settings: Settings) {
         self.settings = settings
@@ -81,6 +99,7 @@ final class Recognizer {
         holdStart = t
         holdAnchor = hand?.center
         holdFired = false
+        pinchSpent = false
         history.removeAll()
         scrollAnchor = (hand != nil && p == scrollPose) ? Double(hand!.tip.y) : nil
         volumeAnchor = (hand != nil && p == volumePose) ? Double(hand!.center.y) : nil
@@ -97,18 +116,39 @@ final class Recognizer {
         return t - holdStart
     }
 
+    private func endGrab(_ events: inout [GestureEvent]) {
+        if grabbing { grabbing = false; grabLast = nil; events.append(.grabEnd) }
+        pinchSpent = true
+    }
+
+    private func endZoom(_ events: inout [GestureEvent]) {
+        if zooming { zooming = false; pinchSpent = true; events.append(.zoomEnd) }
+        zoomCandidateSince = nil
+    }
+
+    /// True once a pinch has stayed open for two frames (so one noisy frame doesn't drop it).
+    private func pinchOpened(_ hand: Hand) -> Bool {
+        pinchOpenFrames = hand.pinch > pinchRelease ? pinchOpenFrames + 1 : 0
+        return pinchOpenFrames >= 2
+    }
+
     private func goToSleep(_ events: inout [GestureEvent]) {
+        endGrab(&events)
+        endZoom(&events)
         if pointerMode { pointerMode = false; events.append(.pointerOff) }
         awake = false
         events.append(.sleep)
     }
 
-    func update(t: Double, hand: Hand?) -> [GestureEvent] {
+    /// `other` is a second hand in view, used only for two-hand pinch.
+    func update(t: Double, hand: Hand?, other: Hand? = nil) -> [GestureEvent] {
         var events: [GestureEvent] = []
         let dt = lastT.map { min(t - $0, 0.2) } ?? 0
         lastT = t
 
         guard let hand else {
+            endGrab(&events)      // never leave the mouse button held down
+            endZoom(&events)
             if awake, let seen = lastSeen, t - seen > settings.sleepAfterSeconds { goToSleep(&events) }
             if pose != .none { setPose(.none, t, nil) }
             rawPose = nil
@@ -128,6 +168,40 @@ final class Recognizer {
         }
         guard awake else { return events }
 
+        // Two hands pinching: expand / shrink by pulling apart / pushing together.
+        if settings.twoHandZoom, let other {
+            let spread = hypot(Double(hand.pinchPoint.x - other.pinchPoint.x), Double(hand.pinchPoint.y - other.pinchPoint.y))
+            if zooming {
+                if hand.pinch < pinchRelease && other.pinch < pinchRelease {
+                    if settings.twoHandResizesWindow {
+                        events.append(.scale(spread / max(zoomStartSpread, 1e-6)))
+                    } else {
+                        while spread > zoomBase * zoomStep { zoomBase *= zoomStep; events.append(.zoom(1)) }
+                        while spread < zoomBase / zoomStep { zoomBase /= zoomStep; events.append(.zoom(-1)) }
+                    }
+                } else {
+                    endZoom(&events)
+                }
+                return events
+            }
+            if hand.pose == .pinch && other.pose == .pinch {
+                let since = zoomCandidateSince ?? t
+                zoomCandidateSince = since
+                if t - since >= poseDebounce {
+                    endGrab(&events)
+                    zooming = true
+                    zoomStartSpread = spread
+                    zoomBase = spread
+                    events.append(.zoomStart)
+                    return events
+                }
+            } else {
+                zoomCandidateSince = nil
+            }
+        } else {
+            endZoom(&events)
+        }
+
         // Pointer mode: the fingertip drives the cursor; only the toggle works.
         if pointerMode {
             if pose == pointerPose && !holdFired && held >= settings.holdSeconds {
@@ -135,9 +209,36 @@ final class Recognizer {
                 pointerMode = false
                 events.append(.pointerOff)
             } else {
-                events.append(.pointer(hand.tip))
+                if settings.pinchGrab {
+                    if grabbing { if pinchOpened(hand) { endGrab(&events) } }
+                    else if pose == .pinch && !pinchSpent { grabbing = true; pinchOpenFrames = 0; events.append(.grabStart) }
+                }
+                events.append(.pointer(hand.center))
             }
             return events
+        }
+
+        // Pinch: grab what's under the cursor and drag it with the hand.
+        if settings.pinchGrab {
+            if grabbing {
+                if pinchOpened(hand) {
+                    endGrab(&events)
+                    holdFired = true
+                } else {
+                    if let last = grabLast {
+                        events.append(.grabMove(CGVector(dx: hand.center.x - last.x, dy: hand.center.y - last.y)))
+                    }
+                    grabLast = hand.center
+                }
+                return events
+            }
+            if pose == .pinch && !pinchSpent {
+                grabbing = true
+                grabLast = hand.center
+                pinchOpenFrames = 0
+                events.append(.grabStart)
+                return events
+            }
         }
 
         if t < cooldownUntil { return events }

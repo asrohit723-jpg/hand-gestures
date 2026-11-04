@@ -8,7 +8,7 @@ enum Snapshot {
         let bg = Color(nsColor: .windowBackgroundColor)
         render(MenuView(state: state, openSettings: {}, openWelcome: {}).background(bg), "menu", dir)
         render(CheatSheet(settings: state.settings).padding(14).frame(width: 340).background(bg), "cheatsheet", dir)
-        render(GesturesTab(state: state).frame(width: 760, height: 900).background(bg), "settings-gestures", dir)
+        render(GesturesTab(state: state).frame(width: 760, height: 1300).background(bg), "settings-gestures", dir)
         render(FeelTab(state: state).frame(width: 640, height: 600).background(bg), "settings-feel", dir)
         render(ShortcutTab(state: state).frame(width: 640, height: 360).background(bg), "settings-shortcut", dir)
         render(PermissionsTab(state: state).frame(width: 640, height: 300).background(bg), "settings-permissions", dir)

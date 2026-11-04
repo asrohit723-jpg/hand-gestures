@@ -21,7 +21,8 @@ enum Input {
     }
 
     enum Key {
-        static let v: CGKeyCode = 9, r: CGKeyCode = 15, q: CGKeyCode = 12
+        static let v: CGKeyCode = 9, r: CGKeyCode = 15, q: CGKeyCode = 12, m: CGKeyCode = 46, f: CGKeyCode = 3
+        static let equal: CGKeyCode = 24, minus: CGKeyCode = 27
         static let three: CGKeyCode = 20, four: CGKeyCode = 21
         static let rightBracket: CGKeyCode = 30, leftBracket: CGKeyCode = 33
         static let returnKey: CGKeyCode = 36, tab: CGKeyCode = 48, space: CGKeyCode = 49
@@ -102,6 +103,24 @@ enum Input {
 
     static var mainScreenSize: CGSize { CGDisplayBounds(CGMainDisplayID()).size }
 
+    static var mouseLocation: CGPoint { CGEvent(source: nil)?.location ?? .zero }
+
+    /// Mouse down / dragged / up at a point (global coordinates, origin top-left of the main display).
+    static func mouse(_ type: CGEventType, at p: CGPoint) {
+        guard let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left) else { return }
+        e.setIntegerValueField(.mouseEventClickState, value: 1)
+        e.post(tap: .cghidEventTap)
+    }
+
+    /// Every connected display together, so a drag can carry things onto another screen.
+    static var desktopBounds: CGRect {
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &ids, &count)
+        return ids.map { CGDisplayBounds($0) }.reduce(CGRect.null) { $0.union($1) }
+    }
+
     /// Readable form of a shortcut, e.g. ⌃⌘→.
     static func describe(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, characters: String?) -> String {
         var s = ""
@@ -163,6 +182,8 @@ enum ActionRunner {
         case .desktopNext: work = { Input.press(Input.Key.right, [.ctrl]) }
         case .desktopPrevious: work = { Input.press(Input.Key.left, [.ctrl]) }
         case .lastApp: work = { Input.press(Input.Key.tab, [.cmd]) }
+        case .minimize: work = { Input.press(Input.Key.m, [.cmd]) }
+        case .fullScreen: work = { Input.press(Input.Key.f, [.ctrl, .cmd]) }
         case .playPause: work = { Input.media(.play) }
         case .nextTrack: work = { Input.media(.next) }
         case .previousTrack: work = { Input.media(.previous) }

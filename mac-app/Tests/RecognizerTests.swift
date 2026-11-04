@@ -14,12 +14,30 @@ final class RecognizerTests: XCTestCase {
             for i in 0..<n {
                 let f = Double(i) / Double(max(1, n - 1))
                 let c = CGPoint(x: a.x + (end.x - a.x) * f, y: a.y + (end.y - a.y) * f)
-                let hand = pose.map { Hand(pose: $0, center: c, tip: tip ?? CGPoint(x: c.x, y: c.y - 0.1)) }
+                let hand = pose.map { Hand(pose: $0, center: c, tip: tip ?? CGPoint(x: c.x, y: c.y - 0.1),
+                                           pinch: $0 == .pinch ? 0.1 : .infinity, pinchPoint: c) }
                 events += rec.update(t: t, hand: hand)
                 t += 1.0 / 30
             }
             return self
         }
+        /// Both hands pinching, their pinch points moving from `spreadFrom` to `spreadTo` apart.
+        @discardableResult
+        func twoHands(_ seconds: Double, spreadFrom a: Double, to b: Double, pinched: Bool = true) -> Driver {
+            let n = max(1, Int(seconds * 30))
+            for i in 0..<n {
+                let f = Double(i) / Double(max(1, n - 1))
+                let half = (a + (b - a) * f) / 2
+                func h(_ x: Double) -> Hand {
+                    Hand(pose: pinched ? .pinch : .openPalm, center: CGPoint(x: x, y: 0.5), tip: CGPoint(x: x, y: 0.4),
+                         pinch: pinched ? 0.1 : 0.9, pinchPoint: CGPoint(x: x, y: 0.5))
+                }
+                events += rec.update(t: t, hand: h(0.5 - half), other: h(0.5 + half))
+                t += 1.0 / 30
+            }
+            return self
+        }
+
         /// Everything but scroll and pointer movement, as short names like "thumbsUp.hold".
         var discrete: [String] {
             events.compactMap {
@@ -30,7 +48,12 @@ final class RecognizerTests: XCTestCase {
                 case .volume(let v): "volume\(v)"
                 case .pointerOn: "pointerOn"
                 case .pointerOff: "pointerOff"
-                case .scroll, .pointer: nil
+                case .grabStart: "grabStart"
+                case .grabEnd: "grabEnd"
+                case .zoomStart: "zoomStart"
+                case .zoomEnd: "zoomEnd"
+                case .zoom(let z): "zoom\(z)"
+                case .scroll, .pointer, .grabMove, .scale: nil
                 }
             }
         }
@@ -74,6 +97,42 @@ final class RecognizerTests: XCTestCase {
         XCTAssertTrue(Updater.isNewer("1.1", than: "1.0.40"))
         XCTAssertFalse(Updater.isNewer("1.0.5", than: "1.0.5"))
         XCTAssertFalse(Updater.isNewer("0.0.0", than: "1.0.1"))
+    }
+
+    func testPinchGrabsDragsAndLetsGo() {
+        let d = Driver().wake()
+            .frames(.pinch, 0.3, from: CGPoint(x: 0.4, y: 0.5))
+            .frames(.pinch, 0.5, from: CGPoint(x: 0.4, y: 0.5), to: CGPoint(x: 0.7, y: 0.4))
+            .frames(.openPalm, 0.3, from: CGPoint(x: 0.7, y: 0.4))
+        XCTAssertEqual(d.discrete, ["grabStart", "grabEnd"])
+        let moved = d.events.reduce(CGVector.zero) { if case .grabMove(let v) = $1 { return CGVector(dx: $0.dx + v.dx, dy: $0.dy + v.dy) }; return $0 }
+        XCTAssertEqual(moved.dx, 0.3, accuracy: 0.03)
+        XCTAssertEqual(moved.dy, -0.1, accuracy: 0.03)
+    }
+
+    func testLosingTheHandReleasesTheGrab() {
+        XCTAssertEqual(Driver().wake().frames(.pinch, 0.4).frames(nil, 0.1).discrete, ["grabStart", "grabEnd"])
+    }
+
+    func testPinchOffDoesNothing() {
+        var s = Settings(); s.pinchGrab = false
+        XCTAssertEqual(Driver(s).wake().frames(.pinch, 1).discrete, [])
+    }
+
+    func testTwoHandPinchZooms() {
+        let d = Driver().wake().twoHands(0.2, spreadFrom: 0.2, to: 0.2).twoHands(0.6, spreadFrom: 0.2, to: 0.4)
+            .twoHands(0.2, spreadFrom: 0.4, to: 0.4, pinched: false)
+        XCTAssertEqual(d.discrete.first, "zoomStart")
+        XCTAssertEqual(d.discrete.last, "zoomEnd")
+        XCTAssertEqual(d.discrete.filter { $0 == "zoom1" }.count, 4)   // 0.2 -> 0.4 is 1.15^4.96
+        XCTAssertFalse(d.discrete.contains("zoom-1"))
+    }
+
+    func testTwoHandPinchResizesWindow() {
+        var s = Settings(); s.twoHandResizesWindow = true
+        let d = Driver(s).wake().twoHands(0.2, spreadFrom: 0.2, to: 0.2).twoHands(0.5, spreadFrom: 0.2, to: 0.3)
+        let last = d.events.compactMap { if case .scale(let f) = $0 { return f }; return nil }.last
+        XCTAssertEqual(last ?? 0, 1.5, accuracy: 0.05)
     }
 
     func testEditedGestureList() {
@@ -141,7 +200,7 @@ final class RecognizerTests: XCTestCase {
             (.openPalm, hand([0, 1, 2, 3], thumb: "out")), (.fist, hand([])), (.point, hand([0])),
             (.lShape, hand([0], thumb: "out")), (.v, hand([0, 1])), (.three, hand([0, 1, 2])),
             (.rock, hand([0, 3])), (.shaka, hand([3], thumb: "out")), (.thumbsUp, hand([], thumb: "up")),
-            (.ok, hand([1, 2, 3], ok: true)),
+            (.ok, hand([1, 2, 3], ok: true)), (.pinch, hand([], ok: true)),
         ]
         for (expected, pts) in cases { XCTAssertEqual(PoseClassifier.classify(pts), expected, "\(expected)") }
     }
