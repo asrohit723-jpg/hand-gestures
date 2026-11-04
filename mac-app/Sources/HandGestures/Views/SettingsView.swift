@@ -48,7 +48,7 @@ struct GesturesTab: View {
             } header: {
                 Text("Gestures")
             } footer: {
-                Text("Hold gestures need the shape held still for about \(String(format: "%.1f", state.settings.holdSeconds)) s; start / stop needs \(String(format: "%.1f", state.settings.wakeSeconds)) s. “Next” and “Previous” switch tabs in browsers, slides in Keynote, PowerPoint and Preview, and skip in QuickTime, IINA and VLC.")
+                Text("Hold gestures need the shape held still for about \(String(format: "%.1f", state.settings.holdSeconds)) s. Start / stop needs \(state.settings.startStopBothHands ? "both hands" : "the shape") held still for \(String(format: "%.1f", state.settings.wakeSeconds)) s. “Next” and “Previous” switch tabs in browsers, slides in Keynote, PowerPoint and Preview, and skip in QuickTime, IINA and VLC.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -139,7 +139,9 @@ struct GestureEditorRow: View {
                 .help(rule.pose.how)
 
                 if locked {
-                    Text(Motion.hold.title).foregroundStyle(.secondary).padding(.horizontal, 6)
+                    Toggle("Both hands", isOn: $state.settings.startStopBothHands)
+                        .toggleStyle(.checkbox)
+                        .help("On: show the shape with both hands at once, so one stray open palm does nothing.")
                         .frame(width: 140, alignment: .leading)
                 } else {
                     Picker("Movement", selection: motion) {

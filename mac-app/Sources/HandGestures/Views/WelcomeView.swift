@@ -34,7 +34,9 @@ struct WelcomeView: View {
             }
 
             Step(number: 3, title: "Try it",
-                 detail: "Raise your hand, palm to the camera, and hold it still for a second. You'll hear a tick.",
+                 detail: state.settings.startStopBothHands
+                    ? "Raise both hands, palms to the camera, and hold them still for a second. You'll hear a tick. Do it again to stop."
+                    : "Raise your hand, palm to the camera, and hold it still for a second. You'll hear a tick.",
                  done: state.awake) {
                 EmptyView()
             }

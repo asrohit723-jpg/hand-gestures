@@ -200,6 +200,11 @@ struct GestureRule: Codable, Equatable, Identifiable {
 
     var gestureTitle: String { "\(pose.title) · \(motion.title.lowercased())" }
 
+    /// The cheat-sheet wording, which says when start / stop takes both hands.
+    func gestureTitle(in settings: Settings) -> String {
+        action == .startStop && settings.startStopBothHands ? "Both hands · \(gestureTitle.lowercased())" : gestureTitle
+    }
+
     var actionTitle: String {
         action == .custom ? (shortcut?.display ?? "Shortcut not set") : action.title
     }
@@ -240,6 +245,8 @@ struct Settings: Codable, Equatable {
     /// Pinch with both hands and pull apart / push together.
     var twoHandZoom = true
     var twoHandResizesWindow = false
+    /// Start / stop needs the shape on both hands at once, so one stray open palm does nothing.
+    var startStopBothHands = true
 
     var sounds = true
     var showHUD = true

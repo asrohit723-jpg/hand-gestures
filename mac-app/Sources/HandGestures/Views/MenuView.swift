@@ -141,8 +141,9 @@ struct CheatSheet: View {
         VStack(alignment: .leading, spacing: 5) {
             ForEach(settings.gestures.filter { $0.action != .none }) { rule in
                 HStack(spacing: 8) {
-                    Text(rule.pose.emoji).frame(width: 22)
-                    Text(rule.gestureTitle).foregroundStyle(.secondary)
+                    Text(rule.action == .startStop && settings.startStopBothHands ? rule.pose.emoji + rule.pose.emoji : rule.pose.emoji)
+                        .fixedSize().frame(minWidth: 22)
+                    Text(rule.gestureTitle(in: settings)).foregroundStyle(.secondary)
                     Spacer(minLength: 8)
                     Text(rule.actionTitle).multilineTextAlignment(.trailing)
                 }

@@ -64,7 +64,8 @@ final class AppState: ObservableObject {
         if !running { return "Off" }
         if pointerMode { return "Pointer mode — hold three fingers to exit" }
         if awake { return settings.practiceMode ? "Listening (practice — nothing runs)" : "Listening" }
-        return "Hold an open palm still to start"
+        let shape = settings.startStopRule.pose.title.lowercased()
+        return settings.startStopBothHands ? "Show \(shape) on both hands, still, to start" : "Hold \(shape) still to start"
     }
 
     var menuBarSymbol: String {

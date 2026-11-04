@@ -52,6 +52,13 @@ final class Recognizer {
     private var scrollPose: Pose?
     private var volumePose: Pose?
 
+    // Both-hands start / stop: when both hands began showing the shape, where, and
+    // whether this showing already fired (it must be lowered before it fires again).
+    private var bothSince: Double?
+    private var bothLastSeen = -1.0
+    private var bothAnchors: (CGPoint, CGPoint)?
+    private var bothFired = false
+
     private var lastSeen: Double?
     private var lastT: Double?
     private var rawPose: Pose?
@@ -132,6 +139,27 @@ final class Recognizer {
         return pinchOpenFrames >= 2
     }
 
+    /// True once, when both hands have shown the start / stop shape, still, for the wake time.
+    /// Brief tracking gaps (under 0.25 s) don't restart the count.
+    private func bothHandsHeld(_ t: Double, _ hand: Hand, _ other: Hand?) -> Bool {
+        guard let other, hand.pose == wakePose, other.pose == wakePose else {
+            if t - bothLastSeen > 0.25 { bothSince = nil; bothFired = false }
+            return false
+        }
+        let moved = bothAnchors.map { a in
+            max(abs(hand.center.x - a.0.x), abs(hand.center.y - a.0.y),
+                abs(other.center.x - a.1.x), abs(other.center.y - a.1.y)) > stillTolerance * 1.5
+        } ?? true
+        if bothSince == nil || t - bothLastSeen > 0.25 || moved {
+            bothSince = t
+            bothAnchors = (hand.center, other.center)
+        }
+        bothLastSeen = t
+        guard !bothFired, let since = bothSince, t - since >= settings.wakeSeconds else { return false }
+        bothFired = true
+        return true
+    }
+
     private func goToSleep(_ events: inout [GestureEvent]) {
         endGrab(&events)
         endZoom(&events)
@@ -160,8 +188,13 @@ final class Recognizer {
         if hand.pose != pose && t - rawSince >= poseDebounce { setPose(hand.pose, t, hand) }
         let held = heldFor(t, hand)
 
-        // Start / stop: its shape held still.
-        if pose == wakePose && !holdFired && held >= settings.wakeSeconds {
+        // Start / stop: its shape held still — on both hands, unless set to one.
+        if settings.startStopBothHands {
+            if bothHandsHeld(t, hand, other) {
+                if awake { goToSleep(&events) } else { awake = true; events.append(.wake) }
+                return events
+            }
+        } else if pose == wakePose && !holdFired && held >= settings.wakeSeconds {
             holdFired = true
             if awake { goToSleep(&events) } else { awake = true; events.append(.wake) }
             return events

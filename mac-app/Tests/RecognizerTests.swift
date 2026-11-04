@@ -21,6 +21,19 @@ final class RecognizerTests: XCTestCase {
             }
             return self
         }
+        /// The start / stop shape held still, on both hands (or one, if that's the setting).
+        @discardableResult
+        func showStartStop(_ seconds: Double = 1.5) -> Driver {
+            let pose = rec.settings.startStopRule.pose
+            guard rec.settings.startStopBothHands else { return frames(pose, seconds) }
+            for _ in 0..<Int(seconds * 30) {
+                func h(_ x: Double) -> Hand { Hand(pose: pose, center: CGPoint(x: x, y: 0.5), tip: CGPoint(x: x, y: 0.4)) }
+                events += rec.update(t: t, hand: h(0.5), other: h(0.85))
+                t += 1.0 / 30
+            }
+            return self
+        }
+
         /// Both hands pinching, their pinch points moving from `spreadFrom` to `spreadTo` apart.
         @discardableResult
         func twoHands(_ seconds: Double, spreadFrom a: Double, to b: Double, pinched: Bool = true) -> Driver {
@@ -57,13 +70,27 @@ final class RecognizerTests: XCTestCase {
                 }
             }
         }
-        func wake() -> Driver { frames(rec.settings.startStopRule.pose, 1.5); frames(Pose.none, 0.3); events.removeAll(); return self }
+        func wake() -> Driver { showStartStop(); frames(Pose.none, 0.3); events.removeAll(); return self }
     }
 
     func testNothingUntilAwake() { XCTAssertEqual(Driver().frames(.thumbsUp, 2).discrete, []) }
     func testWakeAndSleep() {
-        XCTAssertEqual(Driver().frames(.openPalm, 1.5).frames(Pose.none, 0.3).frames(.openPalm, 1.5).discrete, ["wake", "sleep"])
+        XCTAssertEqual(Driver().showStartStop().frames(Pose.none, 0.3).showStartStop().discrete, ["wake", "sleep"])
     }
+    func testOnePalmDoesNotStartOrStop() {
+        XCTAssertEqual(Driver().frames(.openPalm, 3).discrete, [])
+        XCTAssertEqual(Driver().wake().frames(.openPalm, 3).discrete, [])
+    }
+
+    func testHoldingBothPalmsFiresOnce() {
+        XCTAssertEqual(Driver().showStartStop(4).discrete, ["wake"])
+    }
+
+    func testOneHandStartStopWhenBothHandsIsOff() {
+        var s = Settings(); s.startStopBothHands = false
+        XCTAssertEqual(Driver(s).frames(.openPalm, 1.5).discrete, ["wake"])
+    }
+
     func testHoldFiresOnce() { XCTAssertEqual(Driver().wake().frames(.thumbsUp, 3).discrete, ["thumbsUp.hold"]) }
     func testHoldNeedsStillHand() {
         XCTAssertEqual(Driver().wake().frames(.fist, 1, from: CGPoint(x: 0.3, y: 0.5), to: CGPoint(x: 0.7, y: 0.5)).discrete, [])
