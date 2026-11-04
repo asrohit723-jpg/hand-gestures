@@ -29,6 +29,8 @@ final class AppState: ObservableObject {
     @Published private(set) var accessibilityGranted = Input.trusted
     @Published private(set) var cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @Published var errorMessage: String?
+    /// The Settings tab to show; the cheat sheet's Edit button jumps to "gestures".
+    @Published var settingsTab = "gestures"
 
     var previewVisible = false {
         didSet { pipeline.wantsPreview = previewVisible && settings.showPreview }
@@ -144,12 +146,10 @@ final class AppState: ObservableObject {
         case .sleep:
             sound("Bottle")
             note("Paused", symbol: "hand.raised.slash", tint: .secondary)
-        case .trigger(let t):
-            let binding = settings.binding(t)
-            guard binding.action != .none else { return }
-            guard let label = ActionRunner.run(binding, dryRun: dry) else { return }
+        case .gesture(let rule):
+            guard let label = ActionRunner.run(rule, dryRun: dry) else { return }
             sound("Pop")
-            note(dry ? "\(t.emoji)  Would run: \(label)" : label, symbol: binding.action.symbol, tint: .accentColor)
+            note(dry ? "\(rule.pose.emoji)  Would run: \(label)" : label, symbol: rule.action.symbol, tint: .accentColor)
         case .scroll(let px):
             pendingScroll += px
             if abs(pendingScroll) >= 1 {

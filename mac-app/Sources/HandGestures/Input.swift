@@ -127,13 +127,13 @@ enum ActionRunner {
 
     /// Performs the action and returns the label to show, or nil if nothing applies here.
     @discardableResult
-    static func run(_ b: GestureBinding, dryRun: Bool) -> String? {
+    static func run(_ b: GestureRule, dryRun: Bool) -> String? {
         let app = frontApp
         var label = b.action.title
         var work: (() -> Void)?
 
         switch b.action {
-        case .none: return nil
+        case .none, .startStop, .pointer, .scroll, .volume: return nil
         case .dictation: work = { Input.press(Input.Key.space, [.fn]) }
         case .pasteAndSend:
             label = "Paste + send"

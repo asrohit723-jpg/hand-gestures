@@ -27,7 +27,8 @@ struct MenuView: View {
             if state.running { liveStatus }
 
             DisclosureGroup(isExpanded: $showCheatSheet) {
-                CheatSheet(settings: state.settings).padding(.top, 6)
+                CheatSheet(settings: state.settings, onEdit: { state.settingsTab = "gestures"; openSettings() })
+                    .padding(.top, 6)
             } label: {
                 Text("Gesture cheat sheet").font(.callout.weight(.medium))
             }
@@ -134,29 +135,27 @@ struct PermissionBanner: View {
 /// Every gesture and what it currently does.
 struct CheatSheet: View {
     let settings: Settings
+    var onEdit: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            row("✋", "Hold palm still", "Start / stop listening")
-            ForEach(Trigger.holds + Trigger.swipes) { t in
-                let b = settings.binding(t)
-                if b.action != .none {
-                    row(t.emoji, t.title, b.action == .custom ? (b.shortcut?.display ?? "Shortcut") : b.action.title)
+            ForEach(settings.gestures.filter { $0.action != .none }) { rule in
+                HStack(spacing: 8) {
+                    Text(rule.pose.emoji).frame(width: 22)
+                    Text(rule.gestureTitle).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(rule.actionTitle).multilineTextAlignment(.trailing)
                 }
+                .font(.caption)
             }
-            if settings.scrollEnabled { row("☝️", "Point, move up/down", "Scroll") }
-            if settings.volumeEnabled { row("👌", "OK sign, raise/lower", "Volume") }
-            if settings.pointerEnabled { row("3️⃣", "Hold three fingers", "Pointer on / off") }
+            if let onEdit {
+                Button(action: onEdit) {
+                    Label("Edit gestures…", systemImage: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .padding(.top, 4)
+            }
         }
-    }
-
-    private func row(_ emoji: String, _ gesture: String, _ action: String) -> some View {
-        HStack(spacing: 8) {
-            Text(emoji).frame(width: 22)
-            Text(gesture).foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Text(action).multilineTextAlignment(.trailing)
-        }
-        .font(.caption)
     }
 }

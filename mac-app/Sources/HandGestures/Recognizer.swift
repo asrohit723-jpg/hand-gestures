@@ -9,28 +9,37 @@ struct Hand {
 
 enum GestureEvent: Equatable {
     case wake, sleep
-    case trigger(Trigger)
+    case gesture(GestureRule)  // a hold or swipe with a one-off action
     case scroll(Double)        // pixels, positive = up
     case volume(Int)           // +1 / -1
     case pointer(CGPoint)      // 0...1 fingertip position
     case pointerOn, pointerOff
 }
 
-/// Turns a stream of per-frame poses into gesture events: holds, swipes,
-/// scrolling, volume and pointer movement. Pure logic, so it is testable.
+/// Turns a stream of per-frame poses into gesture events, following the user's
+/// gesture list: holds, swipes, scrolling, volume and pointer movement.
+/// Pure logic, so it is testable.
 final class Recognizer {
-    var settings: Settings
+    var settings: Settings { didSet { rebuild() } }
 
     let stillTolerance = 0.04
     let poseDebounce = 0.12
     let swipeWindow = 0.5
     let swipeCooldown = 0.8
-    let scrollDeadzone = 0.04
+    let moveDeadzone = 0.04
     let volumeStep = 0.06
 
     private(set) var awake = false
     private(set) var pointerMode = false
     private(set) var pose: Pose = .none
+
+    // Lookups built from the gesture list; the first rule wins when two clash.
+    private var wakePose: Pose = .openPalm
+    private var pointerPose: Pose?
+    private var holds: [Pose: GestureRule] = [:]
+    private var swipes: [Pose: [Motion: GestureRule]] = [:]
+    private var scrollPose: Pose?
+    private var volumePose: Pose?
 
     private var lastSeen: Double?
     private var lastT: Double?
@@ -44,11 +53,28 @@ final class Recognizer {
     private var scrollAnchor: Double?
     private var volumeAnchor: Double?
 
-    init(settings: Settings) { self.settings = settings }
+    init(settings: Settings) {
+        self.settings = settings
+        rebuild()
+    }
 
-    private static let holdTriggers: [Pose: Trigger] = [
-        .thumbsUp: .thumbsUp, .rock: .rock, .shaka: .shaka, .lShape: .lShape, .fist: .fist,
-    ]
+    private func rebuild() {
+        wakePose = settings.startStopRule.pose
+        pointerPose = nil; holds = [:]; swipes = [:]; scrollPose = nil; volumePose = nil
+        var seen = Set<String>()
+        for r in settings.gestures where r.action != .none {
+            guard seen.insert("\(r.pose.rawValue).\(r.motion.rawValue)").inserted else { continue }
+            switch (r.motion, r.action) {
+            case (.hold, .startStop): break
+            case (.hold, .pointer): pointerPose = r.pose
+            case (.hold, _) where r.action.isDiscrete: holds[r.pose] = r
+            case (.moveUpDown, .scroll): scrollPose = r.pose
+            case (.moveUpDown, .volume): volumePose = r.pose
+            case (let m, _) where m.isSwipe && r.action.isDiscrete: swipes[r.pose, default: [:]][m] = r
+            default: break
+            }
+        }
+    }
 
     private func setPose(_ p: Pose, _ t: Double, _ hand: Hand?) {
         pose = p
@@ -56,8 +82,8 @@ final class Recognizer {
         holdAnchor = hand?.center
         holdFired = false
         history.removeAll()
-        scrollAnchor = (hand != nil && p == .point) ? Double(hand!.tip.y) : nil
-        volumeAnchor = (hand != nil && p == .ok) ? Double(hand!.center.y) : nil
+        scrollAnchor = (hand != nil && p == scrollPose) ? Double(hand!.tip.y) : nil
+        volumeAnchor = (hand != nil && p == volumePose) ? Double(hand!.center.y) : nil
     }
 
     /// Seconds the current pose has been held still; restarts when the hand moves.
@@ -94,8 +120,8 @@ final class Recognizer {
         if hand.pose != pose && t - rawSince >= poseDebounce { setPose(hand.pose, t, hand) }
         let held = heldFor(t, hand)
 
-        // Wake / sleep: open palm held still.
-        if pose == .openPalm && !holdFired && held >= settings.wakeSeconds {
+        // Start / stop: its shape held still.
+        if pose == wakePose && !holdFired && held >= settings.wakeSeconds {
             holdFired = true
             if awake { goToSleep(&events) } else { awake = true; events.append(.wake) }
             return events
@@ -104,7 +130,7 @@ final class Recognizer {
 
         // Pointer mode: the fingertip drives the cursor; only the toggle works.
         if pointerMode {
-            if pose == .three && !holdFired && held >= settings.holdSeconds {
+            if pose == pointerPose && !holdFired && held >= settings.holdSeconds {
                 holdFired = true
                 pointerMode = false
                 events.append(.pointerOff)
@@ -116,45 +142,45 @@ final class Recognizer {
 
         if t < cooldownUntil { return events }
 
-        // Holds.
-        if !holdFired && held >= settings.holdSeconds {
-            if pose == .three && settings.pointerEnabled {
+        // Holds. The start / stop shape waits for its own, longer hold above.
+        if !holdFired && held >= settings.holdSeconds && pose != wakePose {
+            if pose == pointerPose {
                 holdFired = true
                 pointerMode = true
                 events.append(.pointerOn)
                 return events
             }
-            if let trigger = Self.holdTriggers[pose] {
+            if let rule = holds[pose] {
                 holdFired = true
-                events.append(.trigger(trigger))
+                events.append(.gesture(rule))
                 return events
             }
         }
 
         // Swipes.
-        if pose == .openPalm || pose == .v {
+        if let map = swipes[pose] {
             history.append((t, hand.center))
             history.removeAll { t - $0.t > swipeWindow }
             if let first = history.first {
                 let dx = Double(hand.center.x - first.p.x), dy = Double(hand.center.y - first.p.y)
                 let d = settings.swipeDistance
-                var direction: String?
-                if abs(dx) > d && abs(dx) > 1.5 * abs(dy) { direction = dx > 0 ? "right" : "left" }
-                else if abs(dy) > d && abs(dy) > 1.5 * abs(dx) { direction = dy > 0 ? "down" : "up" }
-                if let direction, let trigger = Self.swipeTrigger(pose, direction) {
+                var motion: Motion?
+                if abs(dx) > d && abs(dx) > 1.5 * abs(dy) { motion = dx > 0 ? .swipeRight : .swipeLeft }
+                else if abs(dy) > d && abs(dy) > 1.5 * abs(dx) { motion = dy > 0 ? .swipeDown : .swipeUp }
+                if let motion, let rule = map[motion] {
                     history.removeAll()
                     cooldownUntil = t + swipeCooldown
                     holdFired = true   // a swipe never also counts as a hold
-                    events.append(.trigger(trigger))
+                    events.append(.gesture(rule))
                     return events
                 }
             }
         }
 
-        // Scroll: point, then move the hand up or down from where you started.
-        if pose == .point, settings.scrollEnabled, let anchor = scrollAnchor {
+        // Scroll: hold the shape, then move the hand up or down from where you started.
+        if pose == scrollPose, let anchor = scrollAnchor {
             let offset = anchor - Double(hand.tip.y)          // > 0 when the hand is higher
-            let excess = abs(offset) - scrollDeadzone
+            let excess = abs(offset) - moveDeadzone
             if excess > 0 {
                 var px = excess * settings.scrollSpeed * dt * (offset > 0 ? 1 : -1)
                 if settings.invertScroll { px = -px }
@@ -162,25 +188,13 @@ final class Recognizer {
             }
         }
 
-        // Volume: OK sign, then raise or lower the hand.
-        if pose == .ok, settings.volumeEnabled, var anchor = volumeAnchor {
+        // Volume: hold the shape, then raise or lower the hand.
+        if pose == volumePose, var anchor = volumeAnchor {
             let y = Double(hand.center.y)
             while anchor - y >= volumeStep { anchor -= volumeStep; events.append(.volume(1)) }
             while y - anchor >= volumeStep { anchor += volumeStep; events.append(.volume(-1)) }
             volumeAnchor = anchor
         }
         return events
-    }
-
-    private static func swipeTrigger(_ pose: Pose, _ direction: String) -> Trigger? {
-        switch (pose, direction) {
-        case (.openPalm, "left"): .palmLeft
-        case (.openPalm, "right"): .palmRight
-        case (.openPalm, "up"): .palmUp
-        case (.openPalm, "down"): .palmDown
-        case (.v, "left"): .vLeft
-        case (.v, "right"): .vRight
-        default: nil
-        }
     }
 }

@@ -2,8 +2,13 @@ import AppKit
 import Foundation
 
 /// A hand shape recognised in one frame.
-enum Pose: String, Codable, CaseIterable {
+enum Pose: String, Codable, CaseIterable, Identifiable {
     case openPalm, fist, point, lShape, v, three, rock, shaka, thumbsUp, ok, none
+
+    var id: String { rawValue }
+
+    /// Shapes a gesture can use.
+    static let usable: [Pose] = [.openPalm, .fist, .point, .lShape, .v, .three, .rock, .shaka, .thumbsUp, .ok]
 
     var emoji: String {
         switch self {
@@ -36,78 +41,49 @@ enum Pose: String, Codable, CaseIterable {
         case .none: "No gesture"
         }
     }
-}
-
-/// A gesture the user can assign an action to.
-enum Trigger: String, Codable, CaseIterable, Identifiable {
-    case thumbsUp, rock, shaka, lShape, fist
-    case palmLeft, palmRight, palmUp, palmDown, vLeft, vRight
-
-    var id: String { rawValue }
-
-    static let holds: [Trigger] = [.thumbsUp, .rock, .shaka, .lShape, .fist]
-    static let swipes: [Trigger] = [.palmLeft, .palmRight, .palmUp, .palmDown, .vLeft, .vRight]
-
-    var emoji: String {
-        switch self {
-        case .thumbsUp: "👍"
-        case .rock: "🤘"
-        case .shaka: "🤙"
-        case .lShape: "📸"
-        case .fist: "✊"
-        case .palmLeft, .palmRight, .palmUp, .palmDown: "✋"
-        case .vLeft, .vRight: "✌️"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .thumbsUp: "Thumbs up"
-        case .rock: "Rock sign"
-        case .shaka: "Shaka"
-        case .lShape: "L shape"
-        case .fist: "Fist"
-        case .palmLeft: "Palm swipe left"
-        case .palmRight: "Palm swipe right"
-        case .palmUp: "Palm swipe up"
-        case .palmDown: "Palm swipe down"
-        case .vLeft: "V swipe left"
-        case .vRight: "V swipe right"
-        }
-    }
 
     var how: String {
         switch self {
-        case .thumbsUp: "Thumb up, fingers curled — hold still"
-        case .rock: "Index and pinky up — hold still"
-        case .shaka: "Thumb and pinky out — hold still"
-        case .lShape: "Thumb and index out like a camera corner — hold still"
-        case .fist: "Closed fist — hold still"
-        case .palmLeft, .palmRight, .palmUp, .palmDown: "Open hand, quick move"
-        case .vLeft, .vRight: "Two fingers up, quick move"
+        case .openPalm: "All fingers up"
+        case .fist: "All fingers curled"
+        case .point: "Index finger up"
+        case .lShape: "Thumb and index out"
+        case .v: "Index and middle up"
+        case .three: "Index, middle and ring up"
+        case .rock: "Index and pinky up"
+        case .shaka: "Thumb and pinky out"
+        case .thumbsUp: "Thumb up, fingers curled"
+        case .ok: "Thumb and index touching"
+        case .none: ""
+        }
+    }
+}
+
+/// What the hand does with a shape.
+enum Motion: String, Codable, CaseIterable, Identifiable {
+    case hold, swipeLeft, swipeRight, swipeUp, swipeDown, moveUpDown
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .hold: "Hold still"
+        case .swipeLeft: "Swipe left"
+        case .swipeRight: "Swipe right"
+        case .swipeUp: "Swipe up"
+        case .swipeDown: "Swipe down"
+        case .moveUpDown: "Move up / down"
         }
     }
 
-    var defaultAction: ActionKind {
-        switch self {
-        case .thumbsUp: .dictation
-        case .rock: .pasteAndSend
-        case .shaka: .lastApp
-        case .lShape: .screenshotArea
-        case .fist: .playPause
-        case .palmLeft: .next
-        case .palmRight: .previous
-        case .palmUp: .missionControl
-        case .palmDown: .reload
-        case .vLeft: .desktopNext
-        case .vRight: .desktopPrevious
-        }
-    }
+    var isSwipe: Bool { [.swipeLeft, .swipeRight, .swipeUp, .swipeDown].contains(self) }
 }
 
 /// Something a gesture can do.
 enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case none
+    case startStop, pointer
+    case scroll, volume
     case dictation, pasteAndSend
     case next, previous, nextTab, previousTab, reload
     case missionControl, appExpose, desktopNext, desktopPrevious, lastApp
@@ -120,6 +96,10 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .none: "Nothing"
+        case .startStop: "Start / stop listening"
+        case .pointer: "Laser pointer on / off"
+        case .scroll: "Scroll"
+        case .volume: "Volume"
         case .dictation: "Wispr dictation on / off"
         case .pasteAndSend: "Paste last dictation + Enter"
         case .next: "Next (tab, slide or skip)"
@@ -146,6 +126,10 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .none: "circle.dashed"
+        case .startStop: "hand.raised.fill"
+        case .pointer: "cursorarrow.motionlines"
+        case .scroll: "arrow.up.and.down"
+        case .volume: "speaker.wave.2.fill"
         case .dictation: "mic.fill"
         case .pasteAndSend: "paperplane.fill"
         case .next: "chevron.right.2"
@@ -169,7 +153,11 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    static let groups: [(String, [ActionKind])] = [
+    /// Actions that run once (a key press, a media key…), as opposed to the
+    /// built-in modes the recognizer drives itself.
+    var isDiscrete: Bool { ![.startStop, .pointer, .scroll, .volume].contains(self) }
+
+    static let discreteGroups: [(String, [ActionKind])] = [
         ("Dictation", [.dictation, .pasteAndSend]),
         ("Browsing & presenting", [.next, .previous, .nextTab, .previousTab, .reload]),
         ("Windows & desktops", [.missionControl, .appExpose, .desktopNext, .desktopPrevious, .lastApp]),
@@ -177,6 +165,15 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         ("Capture", [.screenshotArea, .screenshotScreen]),
         ("Other", [.lockScreen, .custom, .none]),
     ]
+
+    /// The actions that make sense for a movement.
+    static func groups(for motion: Motion) -> [(String, [ActionKind])] {
+        switch motion {
+        case .moveUpDown: [("Move up / down", [.scroll, .volume, .none])]
+        case .hold: [("Hand Gestures", [.pointer])] + discreteGroups
+        default: discreteGroups
+        }
+    }
 }
 
 /// A recorded keyboard shortcut.
@@ -186,17 +183,41 @@ struct Shortcut: Codable, Equatable {
     var display: String
 }
 
-struct GestureBinding: Codable, Equatable {
+/// One line of the cheat sheet: a hand shape, what the hand does with it, and the action.
+struct GestureRule: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var pose: Pose
+    var motion: Motion
     var action: ActionKind
     var shortcut: Shortcut?
+
+    var gestureTitle: String { "\(pose.title) · \(motion.title.lowercased())" }
+
+    var actionTitle: String {
+        action == .custom ? (shortcut?.display ?? "Shortcut not set") : action.title
+    }
+
+    static let defaults: [GestureRule] = [
+        .init(pose: .openPalm, motion: .hold, action: .startStop),
+        .init(pose: .thumbsUp, motion: .hold, action: .dictation),
+        .init(pose: .rock, motion: .hold, action: .pasteAndSend),
+        .init(pose: .shaka, motion: .hold, action: .lastApp),
+        .init(pose: .lShape, motion: .hold, action: .screenshotArea),
+        .init(pose: .fist, motion: .hold, action: .playPause),
+        .init(pose: .three, motion: .hold, action: .pointer),
+        .init(pose: .openPalm, motion: .swipeLeft, action: .next),
+        .init(pose: .openPalm, motion: .swipeRight, action: .previous),
+        .init(pose: .openPalm, motion: .swipeUp, action: .missionControl),
+        .init(pose: .openPalm, motion: .swipeDown, action: .reload),
+        .init(pose: .v, motion: .swipeLeft, action: .desktopNext),
+        .init(pose: .v, motion: .swipeRight, action: .desktopPrevious),
+        .init(pose: .point, motion: .moveUpDown, action: .scroll),
+        .init(pose: .ok, motion: .moveUpDown, action: .volume),
+    ]
 }
 
 struct Settings: Codable, Equatable {
-    var bindings: [String: GestureBinding] = Dictionary(
-        uniqueKeysWithValues: Trigger.allCases.map { ($0.rawValue, GestureBinding(action: $0.defaultAction)) })
-    var scrollEnabled = true
-    var volumeEnabled = true
-    var pointerEnabled = true
+    var gestures: [GestureRule] = GestureRule.defaults
 
     var holdSeconds = 0.7
     var wakeSeconds = 1.2
@@ -214,16 +235,80 @@ struct Settings: Codable, Equatable {
     var startOnLaunch = true
     var onboarded = false
 
-    func binding(_ t: Trigger) -> GestureBinding {
-        bindings[t.rawValue] ?? GestureBinding(action: t.defaultAction)
+    /// The rule that starts and stops listening (there is always exactly one).
+    var startStopRule: GestureRule {
+        gestures.first { $0.action == .startStop } ?? GestureRule.defaults[0]
+    }
+
+    /// A problem with a rule, shown under it in the editor.
+    func warning(for rule: GestureRule) -> String? {
+        let same = gestures.filter { $0.pose == rule.pose && $0.motion == rule.motion }
+        if same.count > 1, same.first?.id != rule.id {
+            return "\(rule.pose.title) · \(rule.motion.title.lowercased()) is already used above, so this one won't run."
+        }
+        if rule.motion == .moveUpDown,
+           gestures.contains(where: { $0.pose == rule.pose && ($0.motion == .swipeUp || $0.motion == .swipeDown) }) {
+            return "Moving \(rule.pose.title.lowercased()) up or down can be mistaken for its swipe up / down."
+        }
+        if rule.action == .custom && rule.shortcut == nil { return "Record a shortcut for this gesture." }
+        return nil
     }
 
     static let storageKey = "settings.v1"
 
+    /// Loads saved settings, keeping defaults for anything new, and carries over the
+    /// per-gesture choices saved by versions before the gesture editor.
     static func load() -> Settings {
+        let encoder = JSONEncoder()
         guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let s = try? JSONDecoder().decode(Settings.self, from: data) else { return Settings() }
+              var stored = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let defaultsData = try? encoder.encode(Settings()),
+              let defaults = (try? JSONSerialization.jsonObject(with: defaultsData)) as? [String: Any]
+        else { return Settings() }
+
+        if stored["gestures"] == nil, let old = stored["bindings"] as? [String: Any],
+           let rules = migrate(old, stored), let rulesData = try? encoder.encode(rules) {
+            stored["gestures"] = try? JSONSerialization.jsonObject(with: rulesData)
+        }
+        let merged = defaults.merging(stored.filter { defaults[$0.key] != nil }) { _, new in new }
+        guard let mergedData = try? JSONSerialization.data(withJSONObject: merged),
+              let s = try? JSONDecoder().decode(Settings.self, from: mergedData) else { return Settings() }
         return s
+    }
+
+    /// Before the editor, gestures were a fixed list keyed by name with on/off switches.
+    private static func migrate(_ bindings: [String: Any], _ stored: [String: Any]) -> [GestureRule]? {
+        let old: [String: (Pose, Motion)] = [
+            "thumbsUp": (.thumbsUp, .hold), "rock": (.rock, .hold), "shaka": (.shaka, .hold),
+            "lShape": (.lShape, .hold), "fist": (.fist, .hold),
+            "palmLeft": (.openPalm, .swipeLeft), "palmRight": (.openPalm, .swipeRight),
+            "palmUp": (.openPalm, .swipeUp), "palmDown": (.openPalm, .swipeDown),
+            "vLeft": (.v, .swipeLeft), "vRight": (.v, .swipeRight),
+        ]
+        var rules: [GestureRule] = []
+        for d in GestureRule.defaults {
+            switch d.action {
+            case .pointer where stored["pointerEnabled"] as? Bool == false: continue
+            case .scroll where stored["scrollEnabled"] as? Bool == false: continue
+            case .volume where stored["volumeEnabled"] as? Bool == false: continue
+            default: break
+            }
+            var rule = d
+            if let key = old.first(where: { $0.value == (d.pose, d.motion) })?.key,
+               let b = bindings[key] as? [String: Any],
+               let data = try? JSONSerialization.data(withJSONObject: b),
+               let decoded = try? JSONDecoder().decode(OldBinding.self, from: data) {
+                rule.action = decoded.action
+                rule.shortcut = decoded.shortcut
+            }
+            rules.append(rule)
+        }
+        return rules
+    }
+
+    private struct OldBinding: Codable {
+        var action: ActionKind
+        var shortcut: Shortcut?
     }
 
     func save() {
