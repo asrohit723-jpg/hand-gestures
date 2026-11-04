@@ -181,6 +181,11 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// An on-screen confirmation from outside the gesture pipeline (e.g. the on/off shortcut).
+    func announce(_ text: String, symbol: String, tint: Color) {
+        note(text, symbol: symbol, tint: tint)
+    }
+
     private func note(_ text: String, symbol: String, tint: Color) {
         lastAction = text
         lastActionSymbol = symbol
@@ -191,6 +196,31 @@ final class AppState: ObservableObject {
         guard settings.sounds, let s = NSSound(named: NSSound.Name(name)) else { return }
         s.volume = 0.35
         s.play()
+    }
+
+    // MARK: On / off shortcut
+
+    static let defaultToggleShortcut = Shortcut(
+        keyCode: 4, modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue, display: "⌃⌥H")
+
+    /// The system-wide shortcut that turns Hand Gestures on and off; nil when removed.
+    @Published var toggleShortcut: Shortcut? = AppState.loadToggleShortcut() {
+        didSet {
+            if let s = toggleShortcut, let data = try? JSONEncoder().encode(s) {
+                UserDefaults.standard.set(data, forKey: "toggleShortcut")
+            } else {
+                UserDefaults.standard.set(Data(), forKey: "toggleShortcut")   // empty = removed
+            }
+        }
+    }
+    /// True while the Shortcut page is listening for keys, so the current shortcut doesn't fire.
+    @Published var recordingShortcut = false
+    /// Set when macOS refuses the shortcut (another app already uses it).
+    @Published var shortcutProblem: String?
+
+    private static func loadToggleShortcut() -> Shortcut? {
+        guard let data = UserDefaults.standard.data(forKey: "toggleShortcut") else { return defaultToggleShortcut }
+        return data.isEmpty ? nil : (try? JSONDecoder().decode(Shortcut.self, from: data)) ?? defaultToggleShortcut
     }
 
     // MARK: Dock icon

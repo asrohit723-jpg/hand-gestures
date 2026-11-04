@@ -10,6 +10,7 @@ enum Snapshot {
         render(CheatSheet(settings: state.settings).padding(14).frame(width: 340).background(bg), "cheatsheet", dir)
         render(GesturesTab(state: state).frame(width: 640, height: 600).background(bg), "settings-gestures", dir)
         render(FeelTab(state: state).frame(width: 640, height: 600).background(bg), "settings-feel", dir)
+        render(ShortcutTab(state: state).frame(width: 640, height: 360).background(bg), "settings-shortcut", dir)
         render(PermissionsTab(state: state).frame(width: 640, height: 300).background(bg), "settings-permissions", dir)
         render(WelcomeView(state: state, done: {}).background(bg), "welcome", dir)
         render(HUD.Content(symbol: "arrow.clockwise", text: "Reload page", tint: .accentColor), "hud", dir)

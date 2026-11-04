@@ -31,10 +31,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] in self?.updateIcon() }
             .store(in: &cancellables)
 
-        // ⌃⌥H opens the Hand Gestures window from anywhere.
-        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(controlKey | optionKey)) { [weak self] in
-            self?.toggleControlWindow()
-        }
+        // The on/off shortcut (Settings › Shortcut), re-registered whenever it changes.
+        // It's switched off while the Shortcut page is recording, so the keys reach the recorder.
+        state.$toggleShortcut.combineLatest(state.$recordingShortcut)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] shortcut, recording in self?.registerShortcut(recording ? nil : shortcut) }
+            .store(in: &cancellables)
 
         Updater.shared.startChecking()
 
@@ -74,8 +76,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func toggleControlWindow() {
-        if let w = controlWindow, w.isVisible, w.isKeyWindow { w.close() } else { showControlWindow() }
+    private func registerShortcut(_ shortcut: Shortcut?) {
+        hotKey = nil
+        guard let shortcut else { return }
+        let key = HotKey(keyCode: UInt32(shortcut.keyCode),
+                         modifiers: HotKey.carbonModifiers(shortcut.modifiers)) { [weak self] in
+            self?.toggleOnOff()
+        }
+        if key.registered {
+            hotKey = key
+            state.shortcutProblem = nil
+        } else {
+            state.shortcutProblem = "\(shortcut.display) is already used by macOS or another app. Choose another."
+        }
+    }
+
+    /// The shortcut: off → turn on and open the window; on → turn off and close it.
+    private func toggleOnOff() {
+        if state.running {
+            state.stop()
+            popover.performClose(nil)
+            controlWindow?.close()
+            state.announce("Hand Gestures off", symbol: "hand.raised.slash", tint: .secondary)
+        } else {
+            state.start()
+            showControlWindow()
+            state.announce("Hand Gestures on", symbol: "hand.raised.fill", tint: .green)
+        }
     }
 
     private func showControlWindow() {
@@ -148,6 +175,18 @@ final class HotKey {
     private var ref: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private let action: () -> Void
+    private(set) var registered = false
+
+    /// NSEvent modifier flags -> Carbon modifier mask.
+    static func carbonModifiers(_ raw: UInt) -> UInt32 {
+        let f = NSEvent.ModifierFlags(rawValue: raw)
+        var m = 0
+        if f.contains(.command) { m |= cmdKey }
+        if f.contains(.option) { m |= optionKey }
+        if f.contains(.control) { m |= controlKey }
+        if f.contains(.shift) { m |= shiftKey }
+        return UInt32(m)
+    }
 
     init(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
         self.action = action
@@ -157,8 +196,8 @@ final class HotKey {
             Unmanaged<HotKey>.fromOpaque(user).takeUnretainedValue().action()
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
-        RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: OSType(0x4847_5354), id: 1),
-                            GetApplicationEventTarget(), 0, &ref)
+        registered = RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: OSType(0x4847_5354), id: 1),
+                                         GetApplicationEventTarget(), 0, &ref) == noErr
     }
 
     deinit {

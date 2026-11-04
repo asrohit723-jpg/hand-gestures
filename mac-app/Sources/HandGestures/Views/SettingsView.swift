@@ -12,6 +12,8 @@ struct SettingsView: View {
                 .tabItem { Label("Camera & Feel", systemImage: "slider.horizontal.3") }
             PermissionsTab(state: state)
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
+            ShortcutTab(state: state)
+                .tabItem { Label("Shortcut", systemImage: "command") }
             AboutTab(updater: Updater.shared)
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -159,7 +161,7 @@ struct FeelTab: View {
             } header: {
                 Text("App")
             } footer: {
-                Text("Open Hand Gestures from the Dock, from Spotlight, or with ⌃⌥H anywhere — handy when the menu bar icon is hidden behind the notch.")
+                Text("Open Hand Gestures from the Dock, from Spotlight, or with your shortcut (Settings › Shortcut) — handy when the menu bar icon is hidden behind the notch.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Camera") {
