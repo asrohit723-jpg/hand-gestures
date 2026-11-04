@@ -1,0 +1,11 @@
+[project]
+name = "handgestures"
+version = "0.1.0"
+description = "Control macOS with hand gestures from the camera"
+requires-python = ">=3.10"
+
+[project.scripts]
+hand-gestures = "handgestures.main:main"
+
+[tool.setuptools]
+packages = ["handgestures"]

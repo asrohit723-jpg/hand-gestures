@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+models/
+mac-app/.build/
+mac-app/build/
+.DS_Store
+*.p12
+*.pass
+*.egg-info/

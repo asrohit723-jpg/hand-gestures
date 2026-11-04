@@ -1,0 +1,79 @@
+# Hand gestures for macOS: what each gesture does.
+# Swipe convention: the content follows your hand, like a phone or trackpad.
+# Swipe left = next / forward, swipe right = previous / back.
+
+camera: 0              # 0 = built-in camera
+camera_width: 640      # low resolution keeps CPU use down
+camera_height: 360
+sounds: true           # a soft click when a gesture fires
+
+arm:
+  hold_seconds: 1.2          # open palm held still: start / stop listening
+  idle_disarm_seconds: 30    # stop listening when no hand is seen for this long
+
+# Pose held still for N seconds -> action (fires once per hold).
+holds:
+  thumbs_up: {seconds: 0.6, action: dictation}
+  rock:      {seconds: 0.8, action: paste_and_send}     # index + pinky up
+  shaka:     {seconds: 0.6, action: last_app}           # thumb + pinky out
+  l_shape:   {seconds: 0.8, action: screenshot}         # thumb + index, like a camera corner
+  fist:      {seconds: 0.6, action: play_pause}
+  three:     {seconds: 0.8, action: pointer_mode}       # index + middle + ring; toggles
+
+# Pose moved quickly in one direction -> action.
+swipes:
+  open_palm:
+    left: next
+    right: previous
+    up: mission_control
+    down: reload             # pull down to refresh
+  v:
+    left: desktop_next
+    right: desktop_previous
+
+swipe_detection:
+  window_seconds: 0.5
+  distance: 0.18             # fraction of the camera frame
+  cooldown_seconds: 0.8
+
+scroll:
+  pose: point                # point with your index finger, then move the hand up or down
+  deadzone: 0.04             # how far you move before it scrolls
+  speed: 6000                # pixels per second per unit of frame moved past the deadzone
+  invert: false
+
+volume:
+  pose: ok                   # OK sign, then raise or lower the hand
+  step: 0.06                 # hand travel per volume step
+
+pointer:
+  toggle_pose: three
+  margin: 0.2                # the middle 60% of the frame maps to the whole screen
+  smoothing: 0.35            # 0..1, higher = steadier but slower cursor
+
+actions:
+  dictation:      {keys: "fn+space"}          # Wispr Flow hands-free on / off
+  paste_and_send: [{keys: "cmd+ctrl+v"}, {wait: 0.4}, {keys: return}]   # Wispr: paste last transcript, then Enter
+  last_app:       {keys: "cmd+tab"}
+  screenshot:     {keys: "cmd+ctrl+shift+4"}  # drag an area; it goes to the clipboard
+  play_pause:     {media: play}
+  mission_control: {keys: "ctrl+up"}
+  desktop_next:   {keys: "ctrl+right"}
+  desktop_previous: {keys: "ctrl+left"}
+  reload:         {keys: "cmd+r"}
+  next:
+    by_app:
+      - apps: ["Google Chrome", "Safari", "Arc", "Microsoft Edge", "Brave Browser", "Firefox"]
+        do: {keys: "cmd+shift+]"}            # next tab
+      - apps: ["Keynote", "Microsoft PowerPoint", "Preview"]
+        do: {keys: right}                    # next slide
+      - apps: ["QuickTime Player", "IINA", "VLC"]
+        do: {keys: right}                    # skip forward
+  previous:
+    by_app:
+      - apps: ["Google Chrome", "Safari", "Arc", "Microsoft Edge", "Brave Browser", "Firefox"]
+        do: {keys: "cmd+shift+["}
+      - apps: ["Keynote", "Microsoft PowerPoint", "Preview"]
+        do: {keys: left}
+      - apps: ["QuickTime Player", "IINA", "VLC"]
+        do: {keys: left}
