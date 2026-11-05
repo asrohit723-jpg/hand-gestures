@@ -60,7 +60,7 @@ struct AboutTab: View {
                 HStack {
                     Text(statusText).foregroundStyle(statusIsError ? Color.red : Color.secondary)
                     Spacer()
-                    Button("Check now") { updater.check() }
+                    Button("Check Now") { updater.check() }
                         .disabled(updater.status == .checking || updater.status == .downloading || updater.status == .installing)
                 }
                 Toggle("Check for updates automatically", isOn: Binding(get: { updater.autoCheck },

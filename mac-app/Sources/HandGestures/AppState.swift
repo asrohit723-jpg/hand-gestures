@@ -28,8 +28,8 @@ final class AppState: ObservableObject {
     @Published private(set) var accessibilityGranted = Input.trusted
     @Published private(set) var cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @Published var errorMessage: String?
-    /// The Settings tab to show; the cheat sheet's Edit button jumps to "gestures".
-    @Published var settingsTab = "gestures"
+    /// The Settings pane to show; the cheat sheet's Edit button jumps to "gestures".
+    @Published var settingsTab = "general"
 
     var previewVisible = false {
         didSet { pipeline.wantsPreview = previewVisible && settings.showPreview }

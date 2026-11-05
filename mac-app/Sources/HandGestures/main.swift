@@ -122,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.performClose(nil)
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: "Hand Gestures Settings", view: SettingsView(state: state))
+            settingsWindow?.setFrameAutosaveName("Settings")
         }
         present(settingsWindow!)
     }

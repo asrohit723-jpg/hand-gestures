@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings › Shortcut: the system-wide key that turns Hand Gestures on and off.
+/// Settings › Keyboard Shortcut: the system-wide key that turns Hand Gestures on and off.
 struct ShortcutTab: View {
     @ObservedObject var state: AppState
     @State private var monitor: Any?
@@ -10,7 +10,7 @@ struct ShortcutTab: View {
         Form {
             Section {
                 HStack(spacing: 14) {
-                    Image(systemName: "command").font(.title2).foregroundStyle(.secondary).frame(width: 30)
+                    IconTile(symbol: "command", tint: .purple, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Turn Hand Gestures on and off")
                         Text("Press once to turn it on and open the window. Press again to turn it off.")
@@ -30,8 +30,6 @@ struct ShortcutTab: View {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)
                 }
-            } header: {
-                Text("Keyboard shortcut")
             } footer: {
                 Text("Works from any app, even when the menu bar icon is hidden behind the notch.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -45,7 +43,7 @@ struct ShortcutTab: View {
                     }
                     .disabled(state.toggleShortcut == AppState.defaultToggleShortcut)
                     Spacer()
-                    Button("Remove shortcut", role: .destructive) {
+                    Button("Remove Shortcut", role: .destructive) {
                         stopRecording()
                         state.toggleShortcut = nil
                     }

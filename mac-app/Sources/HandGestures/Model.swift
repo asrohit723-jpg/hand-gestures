@@ -79,6 +79,17 @@ enum Motion: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    var symbol: String {
+        switch self {
+        case .hold: "hand.raised"
+        case .swipeLeft: "arrow.left"
+        case .swipeRight: "arrow.right"
+        case .swipeUp: "arrow.up"
+        case .swipeDown: "arrow.down"
+        case .moveUpDown: "arrow.up.arrow.down"
+        }
+    }
+
     var isSwipe: Bool { [.swipeLeft, .swipeRight, .swipeUp, .swipeDown].contains(self) }
 }
 
@@ -320,7 +331,7 @@ struct Settings: Codable, Equatable {
     func warning(for rule: GestureRule) -> String? {
         let same = gestures.filter { $0.pose == rule.pose && $0.motion == rule.motion }
         if same.count > 1, same.first?.id != rule.id {
-            return "\(rule.pose.title) · \(rule.motion.title.lowercased()) is already used above, so this one won't run."
+            return "\(rule.pose.title) · \(rule.motion.title.lowercased()) is already used in this list, so this one won't run."
         }
         if rule.motion == .moveUpDown,
            gestures.contains(where: { $0.pose == rule.pose && ($0.motion == .swipeUp || $0.motion == .swipeDown) }) {

@@ -31,14 +31,14 @@ The app copies what people already know: the trackpad and Vision Pro.
 | 📸 L shape, hold | Screenshot an area |
 | 👌 OK sign, move up / down | Volume |
 
-A relaxed or raised hand never moves the pointer, and hands are ignored for a second after any key press. Everything except the pointer and pinch can be changed in Settings › Gestures.
+A relaxed or raised hand never moves the pointer, and hands are ignored for a second after any key press. Everything except the pointer and pinch can be changed in Settings › Gestures; the pointer, clicks and scrolling are tuned in Settings › Pointer & Clicks.
 
 ### Updating
 
 Push a change under `mac-app/` to `main`. GitHub Actions
 (`.github/workflows/release.yml`) tests it, builds it, signs it with the app's own certificate
 and publishes a release `v1.0.<run>`. The app checks GitHub every few hours, and you can also
-use Settings › About › Check now. It then shows **Update now**, which swaps the app in place and
+use Settings › About › Check Now. It then shows **Update now**, which swaps the app in place and
 relaunches. Every release is signed with the same certificate, so macOS keeps Camera and
 Accessibility access, and the app refuses any download not signed with it.
 
