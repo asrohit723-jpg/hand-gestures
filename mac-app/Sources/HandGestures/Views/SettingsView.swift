@@ -59,17 +59,18 @@ struct GesturesTab: View {
             }
 
             Section {
-                PinchRow(emoji: "✋", title: "Hand moves the pointer",
-                         detail: "Hold your hand up, relaxed or pointing, and the pointer follows it, like a mouse. It stops while your hand makes a gesture shape.",
+                PinchRow(emoji: "☝️", title: "Point to pick up the pointer",
+                         detail: "Point with your index finger and hold it still for a moment — a ring appears around the pointer. Move your hand to move it, like a mouse: slowly for precision, quickly to go far. Lower your hand or change shape to let go; the pointer stays where it is. A relaxed or raised hand does nothing.",
                          isOn: $state.settings.handPointer)
                 if state.settings.handPointer {
-                    SliderRow(title: "Pointer reach", value: reach, range: 0.3...0.9,
-                              low: "Big arm moves", high: "Small moves", format: nil)
+                    SliderRow(title: "Pointer speed", value: $state.settings.pointerSpeed, range: 0.4...2.5,
+                              low: "Slow", high: "Fast", format: nil)
                     SliderRow(title: "Pointer steadiness", value: $state.settings.pointerSmoothing, range: 0...0.85,
                               low: "Responsive", high: "Steady", format: nil)
+                    Toggle("Show a ring around the pointer while your hand holds it", isOn: $state.settings.showPointerRing)
                 }
                 PinchRow(emoji: "🤏", title: "Pinch to click",
-                         detail: "Touch thumb and index: a quick pinch clicks, two quick pinches double-click, pinch and hold still right-clicks, pinch and move drags (pictures, files, windows — even onto another screen).",
+                         detail: "While you hold the pointer, touch thumb and index: a quick pinch clicks, two quick pinches double-click, pinch and hold still right-clicks, pinch and move drags (pictures, files, windows — even onto another screen).",
                          isOn: $state.settings.pinchGrab)
                 if state.settings.pinchGrab {
                     SliderRow(title: "Hold for right-click", value: $state.settings.rightClickSeconds, range: 0.4...1.2,
@@ -84,8 +85,10 @@ struct GesturesTab: View {
                         Text("Resizes the window under the pointer").tag(true)
                     }
                 }
+                Toggle("Pause while typing", isOn: $state.settings.pauseWhileTyping)
+                    .help("Hands are ignored for a second after any key press, like a trackpad ignoring your palm.")
             } header: {
-                Text("Pointer and clicks, like a trackpad")
+                Text("Pointer and clicks, like a mouse")
             }
 
             Section {
@@ -122,11 +125,6 @@ struct GesturesTab: View {
         } message: {
             Text("Your changes to the gesture list will be replaced.")
         }
-    }
-
-    /// "Pointer reach": the slider grows as the camera area shrinks, so right = smaller arm moves.
-    private var reach: Binding<Double> {
-        Binding(get: { 1.2 - state.settings.pointerArea }, set: { state.settings.pointerArea = 1.2 - $0 })
     }
 
     /// A new line using the first shape not used for "hold still" yet.

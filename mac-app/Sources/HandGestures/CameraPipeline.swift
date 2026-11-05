@@ -147,7 +147,10 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         lastPrimary = hands.first?.center
         let hand = hands.first
 
-        let events = recognizer.update(t: t, hand: hand, other: hands.count > 1 ? hands[1] : nil)
+        // Typing: hands near the keyboard aren't gestures. Paused for a second after any key press.
+        let typing = recognizer.settings.pauseWhileTyping
+            && CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown) < 1.0
+        let events = recognizer.update(t: t, hand: hand, other: hands.count > 1 ? hands[1] : nil, typing: typing)
 
         var preview: CGImage?
         if wantsPreview && frameCount % 2 == 0 {

@@ -10,7 +10,8 @@ final class RecognizerTests: XCTestCase {
         init(_ settings: Settings = Settings()) { rec = Recognizer(settings: settings) }
 
         @discardableResult
-        func frames(_ pose: Pose?, _ seconds: Double, from a: CGPoint = CGPoint(x: 0.5, y: 0.5), to b: CGPoint? = nil) -> Driver {
+        func frames(_ pose: Pose?, _ seconds: Double, from a: CGPoint = CGPoint(x: 0.5, y: 0.5), to b: CGPoint? = nil,
+                    typing: Bool = false) -> Driver {
             let end = b ?? a
             let n = max(1, Int(seconds * 30))
             for i in 0..<n {
@@ -18,10 +19,15 @@ final class RecognizerTests: XCTestCase {
                 let c = CGPoint(x: a.x + (end.x - a.x) * f, y: a.y + (end.y - a.y) * f)
                 let hand = pose.map { Hand(pose: $0, center: c, tip: CGPoint(x: c.x, y: c.y - 0.1),
                                            pinch: $0 == .pinch ? 0.1 : .infinity, pinchPoint: c) }
-                events += rec.update(t: t, hand: hand)
+                events += rec.update(t: t, hand: hand, typing: typing)
                 t += 1.0 / 30
             }
             return self
+        }
+
+        /// Awake, then point and hold still to pick up the pointer.
+        func holdingPointer(at p: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> Driver {
+            _ = wake(); frames(.point, 0.5, from: p); events.removeAll(); return self
         }
 
         /// The start / stop shape held still, on both hands (or one, if that's the setting).
@@ -61,6 +67,8 @@ final class RecognizerTests: XCTestCase {
             events.compactMap {
                 switch $0 {
                 case .wake: "wake"
+                case .engage: "engage"
+                case .release: "release"
                 case .sleep: "sleep"
                 case .gesture(let r): "\(r.pose.rawValue).\(r.motion.rawValue)"
                 case .volume(let v): "volume\(v)"
@@ -112,9 +120,44 @@ final class RecognizerTests: XCTestCase {
 
     // MARK: Pointer and clicks
 
-    func testRelaxedOrPointingHandAims() {
-        XCTAssertGreaterThan(Driver().wake().frames(.point, 0.5).aims, 10)
-        XCTAssertGreaterThan(Driver().wake().frames(Pose.none, 0.5).aims, 10)
+    func testRelaxedOrRaisedHandDoesNothing() {
+        // The glitch this design fixes: a hand just lifted near the laptop must not move the pointer.
+        for pose: Pose in [.none, .openPalm, .v, .fist, .thumbsUp, .ok] {
+            let d = Driver().wake().frames(pose, 1, from: CGPoint(x: 0.3, y: 0.6), to: CGPoint(x: 0.7, y: 0.4))
+            XCTAssertEqual(d.aims, 0, "\(pose)")
+            XCTAssertFalse(d.discrete.contains("engage"), "\(pose)")
+        }
+    }
+
+    func testPointingAndHoldingStillPicksUpThePointer() {
+        let d = Driver().wake().frames(.point, 0.6)
+        XCTAssertEqual(d.discrete, ["engage"])
+        XCTAssertGreaterThan(d.aims, 5)
+    }
+
+    func testPointingWhileMovingDoesNotPickItUp() {
+        let d = Driver().wake().frames(.point, 0.6, from: CGPoint(x: 0.2, y: 0.5), to: CGPoint(x: 0.8, y: 0.5))
+        XCTAssertFalse(d.discrete.contains("engage"))
+        XCTAssertEqual(d.aims, 0)
+    }
+
+    func testTheHeldPointerFollowsTheHand() {
+        let d = Driver().holdingPointer().frames(.point, 0.5, from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.7, y: 0.5))
+        XCTAssertGreaterThan(d.aims, 10)
+        XCTAssertEqual(d.discrete, [])
+    }
+
+    func testChangingShapeOrLoweringTheHandLetsGo() {
+        XCTAssertEqual(Driver().holdingPointer().frames(.openPalm, 0.6).discrete, ["release"])
+        XCTAssertEqual(Driver().holdingPointer().frames(nil, 0.1).discrete, ["release"])
+        // A brief flicker of another shape doesn't drop it.
+        XCTAssertEqual(Driver().holdingPointer().frames(Pose.none, 0.15).frames(.point, 0.3).discrete, [])
+    }
+
+    func testTypingPausesTheHand() {
+        XCTAssertEqual(Driver().holdingPointer().frames(.point, 0.2, typing: true).discrete, ["release"])
+        XCTAssertFalse(Driver().wake().frames(.point, 1, typing: true).discrete.contains("engage"))
+        XCTAssertEqual(Driver().wake().frames(.thumbsUp, 2, typing: true).discrete, [])
     }
 
     func testGestureShapesDoNotMoveThePointer() {
@@ -123,57 +166,62 @@ final class RecognizerTests: XCTestCase {
         }
     }
 
-    func testHandPointerOff() {
+    func testPinchWithoutHoldingThePointerDoesNotClick() {
+        XCTAssertEqual(Driver().wake().frames(.pinch, 0.3).frames(Pose.none, 0.3).discrete, [])
+    }
+
+    func testHandPointerOffLetsAPinchClickAtTheTrackpadPointer() {
         var s = Settings(); s.handPointer = false
-        XCTAssertEqual(Driver(s).wake().frames(.point, 0.5).aims, 0)
+        let d = Driver(s).wake().frames(.point, 0.5)
+        XCTAssertEqual(d.aims, 0)
+        XCTAssertEqual(Driver(s).wake().frames(.pinch, 0.2).frames(Pose.none, 0.2).discrete, ["pinchDown", "click1"])
     }
 
     func testQuickPinchClicks() {
-        XCTAssertEqual(Driver().wake().frames(.pinch, 0.2).frames(Pose.none, 0.2).discrete, ["pinchDown", "click1"])
+        XCTAssertEqual(Driver().holdingPointer().frames(.pinch, 0.2).frames(.point, 0.2).discrete, ["pinchDown", "click1"])
     }
 
     func testTwoQuickPinchesDoubleClick() {
-        let d = Driver().wake().frames(.pinch, 0.15).frames(Pose.none, 0.12).frames(.pinch, 0.15).frames(Pose.none, 0.2)
+        let d = Driver().holdingPointer().frames(.pinch, 0.15).frames(.point, 0.12).frames(.pinch, 0.15).frames(.point, 0.2)
         XCTAssertEqual(d.discrete, ["pinchDown", "click1", "pinchDown", "click2"])
     }
 
     func testSlowSecondPinchIsASingleClick() {
-        let d = Driver().wake().frames(.pinch, 0.15).frames(Pose.none, 0.8).frames(.pinch, 0.15).frames(Pose.none, 0.2)
+        let d = Driver().holdingPointer().frames(.pinch, 0.15).frames(.point, 0.8).frames(.pinch, 0.15).frames(.point, 0.2)
         XCTAssertEqual(d.discrete, ["pinchDown", "click1", "pinchDown", "click1"])
     }
 
     func testPinchAndHoldRightClicks() {
-        XCTAssertEqual(Driver().wake().frames(.pinch, 1).frames(Pose.none, 0.2).discrete, ["pinchDown", "rightClick"])
+        XCTAssertEqual(Driver().holdingPointer().frames(.pinch, 1).frames(.point, 0.2).discrete, ["pinchDown", "rightClick"])
     }
 
     func testPinchAndMoveDrags() {
-        let d = Driver().wake()
+        let d = Driver().holdingPointer(at: CGPoint(x: 0.4, y: 0.5))
             .frames(.pinch, 0.15, from: CGPoint(x: 0.4, y: 0.5))
             .frames(.pinch, 0.5, from: CGPoint(x: 0.4, y: 0.5), to: CGPoint(x: 0.7, y: 0.4))
-            .frames(.openPalm, 0.2, from: CGPoint(x: 0.7, y: 0.4))
+            .frames(.point, 0.2, from: CGPoint(x: 0.7, y: 0.4))
         XCTAssertEqual(d.discrete, ["pinchDown", "dragStart", "dragEnd"])
         XCTAssertGreaterThan(d.aims, 5)    // the dragged thing follows the hand
     }
 
     func testLosingTheHandMidDragLetsGo() {
-        let d = Driver().wake().frames(.pinch, 0.15).frames(.pinch, 0.3, to: CGPoint(x: 0.7, y: 0.5)).frames(nil, 0.1)
-        XCTAssertEqual(d.discrete, ["pinchDown", "dragStart", "dragEnd"])
+        let d = Driver().holdingPointer().frames(.pinch, 0.15).frames(.pinch, 0.3, to: CGPoint(x: 0.7, y: 0.5)).frames(nil, 0.1)
+        XCTAssertEqual(d.discrete, ["pinchDown", "dragStart", "dragEnd", "release"])
     }
 
     func testOKSignNeverClicks() {
-        let d = Driver().wake()
+        let d = Driver().holdingPointer()
         for _ in 0..<20 {
             d.events += d.rec.update(t: d.t, hand: Hand(pose: .ok, center: CGPoint(x: 0.5, y: 0.5), tip: .zero,
                                                        pinch: 0.1, pinchPoint: CGPoint(x: 0.5, y: 0.5)))
             d.t += 1.0 / 30
         }
-        d.frames(Pose.none, 0.2)
         XCTAssertFalse(d.discrete.contains("pinchDown"))
     }
 
     func testPinchOffDoesNothing() {
         var s = Settings(); s.pinchGrab = false
-        XCTAssertEqual(Driver(s).wake().frames(.pinch, 1).frames(Pose.none, 0.2).discrete, [])
+        XCTAssertEqual(Driver(s).holdingPointer().frames(.pinch, 1).frames(.point, 0.2).discrete, [])
     }
 
     // MARK: Two hands

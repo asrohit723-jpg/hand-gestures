@@ -11,8 +11,10 @@ The app copies what people already know: the trackpad and Vision Pro.
 | Gesture | Does |
 |---|---|
 | ✋✋ Both palms open, held still | Start / stop listening |
-| ✋ Relaxed hand or point, move | Move the pointer |
-| 🤏 Pinch | Click |
+| ☝️ Point and hold still a moment | Pick up the pointer (a ring appears) |
+| ☝️ Point and move | Move the pointer, like a mouse: slow = precise, quick = far |
+| 👇 Lower your hand or change shape | Let go (the pointer stays put) |
+| 🤏 Pinch, while holding the pointer | Click |
 | 🤏 Pinch twice | Double-click |
 | 🤏 Pinch and hold still | Right-click |
 | 🤏 Pinch and move | Drag (files, windows, across screens) |
@@ -29,7 +31,7 @@ The app copies what people already know: the trackpad and Vision Pro.
 | 📸 L shape, hold | Screenshot an area |
 | 👌 OK sign, move up / down | Volume |
 
-Everything except the pointer and pinch can be changed in Settings › Gestures.
+A relaxed or raised hand never moves the pointer, and hands are ignored for a second after any key press. Everything except the pointer and pinch can be changed in Settings › Gestures.
 
 ### Updating
 

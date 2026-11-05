@@ -278,10 +278,16 @@ struct Settings: Codable, Equatable {
     var invertScroll = false
     var pointerSmoothing = 0.35
 
-    /// A relaxed or pointing hand moves the pointer, like a mouse.
+    /// Point and hold a beat to pick up the pointer; the hand then moves it like a mouse.
     var handPointer = true
-    /// How much of the camera view maps to the whole screen (smaller = less arm movement).
+    /// How much of the camera view maps to the whole screen (no longer used: the pointer moves like a mouse).
     var pointerArea = 0.55
+    /// How far the pointer travels for a hand movement.
+    var pointerSpeed = 1.0
+    /// A ring around the pointer while the hand is holding it.
+    var showPointerRing = true
+    /// Ignore hands for a moment after a key press, like a trackpad ignoring your palm.
+    var pauseWhileTyping = true
     /// Pinch to click; pinch twice to double-click; pinch and hold to right-click; pinch and move to drag.
     var pinchGrab = true
     var rightClickSeconds = 0.6

@@ -139,7 +139,11 @@ struct CheatSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if settings.handPointer { row("✋", "Relaxed hand or point · move", "Move the pointer") }
+            if settings.handPointer {
+                row("☝️", "Point, hold still a moment", "Pick up the pointer (ring shows)")
+                row("☝️", "Point and move", "Move the pointer")
+                row("👇", "Lower your hand", "Let go of the pointer")
+            }
             if settings.pinchGrab {
                 row("🤏", "Pinch", "Click")
                 row("🤏", "Pinch twice", "Double-click")

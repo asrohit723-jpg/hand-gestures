@@ -40,9 +40,11 @@ final class AppState: ObservableObject {
     private var pendingScroll = 0.0
     private var mouseDown = false
     private var pressPoint = CGPoint.zero          // where a pinch clicks / starts a drag
-    private var cursorPosition = CGPoint.zero
-    private var dragOffset: CGVector?
+    private var handBase: CGPoint?                 // filtered palm position the last move was measured from
+    private var lastAim = 0.0
+    private var frozen = false                     // fingers closed: the pointer holds still
     private var aimTrail: [(t: Double, p: CGPoint)] = []
+    private let ring = PointerRing()
     private var filterX = OneEuroFilter()
     private var filterY = OneEuroFilter()
     private var permissionTimer: Timer?
@@ -105,7 +107,8 @@ final class AppState: ObservableObject {
 
     func stop() {
         pipeline.stop()
-        if mouseDown { Input.mouse(.leftMouseUp, at: cursorPosition); mouseDown = false }
+        if mouseDown { Input.mouse(.leftMouseUp, at: Input.mouseLocation); mouseDown = false }
+        ring.hide()
         WindowResizer.end()
         running = false
         awake = false
@@ -172,29 +175,41 @@ final class AppState: ObservableObject {
                           symbol: "speaker.wave.2.fill", tint: .accentColor) }
             else { Input.media(step > 0 ? .volumeUp : .volumeDown) }
 
+        case .engage:
+            handBase = nil            // movement starts from here: the pointer never jumps
+            if settings.showPointerRing { ring.show(at: Input.mouseLocation) }
+        case .release:
+            handBase = nil
+            frozen = false
+            ring.hide()
         case .aim(let p):
-            guard !dry else { return }
-            aim(at: p)
+            aim(by: p)                // moves in practice mode too, so pointing can be learned
         case .pinchDown:
-            // Fingers closing nudge the hand; click where it was aimed a moment before.
+            // Click where the pointer was a moment before the fingers closed.
             let now = CACurrentMediaTime()
-            pressPoint = aimTrail.last(where: { now - $0.t >= 0.12 })?.p ?? Input.mouseLocation
-            if !dry && pressPoint != Input.mouseLocation { Input.moveCursor(to: pressPoint) }
+            pressPoint = aimTrail.last(where: { now - $0.t >= 0.1 })?.p ?? Input.mouseLocation
+            frozen = true
+            ring.setPressed(true)
+            if pressPoint != Input.mouseLocation { Input.moveCursor(to: pressPoint); ring.move(to: pressPoint) }
         case .click(let count):
+            unfreeze()
             if dry { note(count == 2 ? "🤏🤏  Would double-click" : "🤏  Would click", symbol: "cursorarrow.click", tint: .accentColor); return }
             Input.click(at: pressPoint, count: count)
         case .rightClick:
+            unfreeze()
             if dry { note("🤏  Would right-click", symbol: "contextualmenu.and.cursorarrow", tint: .accentColor); return }
             sound("Pop")
             Input.rightClick(at: pressPoint)
         case .dragStart:
+            frozen = false
+            handBase = nil            // carry on from the press point, no jump
             if dry { note("🤏  Would drag", symbol: "hand.pinch.fill", tint: .accentColor); return }
             Input.mouse(.leftMouseDown, at: pressPoint)
             mouseDown = true
-            dragOffset = nil          // set from the next aim, so the dragged thing doesn't jump
         case .dragEnd:
+            unfreeze()
             guard mouseDown else { return }
-            Input.mouse(.leftMouseUp, at: cursorPosition)
+            Input.mouse(.leftMouseUp, at: Input.mouseLocation)
             mouseDown = false
 
         case .zoomStart:
@@ -216,35 +231,45 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Maps a hand position to the screens, filters the jitter out, and moves the pointer
-    /// (dragging when the button is held).
-    private func aim(at p: CGPoint) {
+    private func unfreeze() {
+        frozen = false
+        handBase = nil
+        ring.setPressed(false)
+    }
+
+    /// Moves the pointer by how far the palm moved since the last frame, like a mouse:
+    /// slow moves are precise, quick moves go far. The palm position is filtered first
+    /// (One Euro: steady when still, quick when moving) and tiny wobbles are ignored.
+    private func aim(by p: CGPoint) {
         let now = CACurrentMediaTime()
-        // The middle of the camera view, sized by "Pointer area", covers every screen.
-        let w = settings.pointerArea, h = settings.pointerArea * 0.75
-        let x = min(max((Double(p.x) - (0.5 - w / 2)) / w, 0), 1)
-        let y = min(max((Double(p.y) - (0.48 - h / 2)) / h, 0), 1)
-        let b = Input.desktopBounds
-        var target = CGPoint(x: b.minX + x * b.width, y: b.minY + y * b.height)
-
-        if mouseDown {
-            // Keep the dragged thing under where the pinch started.
-            if dragOffset == nil {
-                dragOffset = CGVector(dx: pressPoint.x - target.x, dy: pressPoint.y - target.y)
-                filterX.reset(to: Double(pressPoint.x)); filterY.reset(to: Double(pressPoint.y))
-            }
-            target.x += dragOffset!.dx; target.y += dragOffset!.dy
-        }
-
-        // One Euro filter: steady when the hand is still, quick when it moves.
         let minCutoff = max(0.3, 2.5 * (1 - settings.pointerSmoothing))
         filterX.minCutoff = minCutoff; filterY.minCutoff = minCutoff
-        let next = CGPoint(x: filterX.filter(Double(target.x), at: now), y: filterY.filter(Double(target.y), at: now))
-        cursorPosition = CGPoint(x: min(max(next.x, b.minX), b.maxX - 1), y: min(max(next.y, b.minY), b.maxY - 1))
+        filterX.beta = 8; filterY.beta = 8          // palm units are 0...1 of the frame
+        guard let base = handBase else {
+            filterX.reset(to: Double(p.x)); filterY.reset(to: Double(p.y))
+            handBase = p
+            lastAim = now
+            return
+        }
+        let hand = CGPoint(x: filterX.filter(Double(p.x), at: now), y: filterY.filter(Double(p.y), at: now))
+        let dx = Double(hand.x - base.x), dy = Double(hand.y - base.y)
+        let distance = hypot(dx, dy)
+        guard !frozen, distance > 0.0015 else { return }    // a resting hand's wobble builds up instead of moving
+        let speed = distance / max(now - lastAim, 1.0 / 60)
+        handBase = hand
+        lastAim = now
 
-        aimTrail.append((now, cursorPosition))
+        // Acceleration: about 0.6x the screen width per frame-width at a slow move, up to 3x when quick.
+        let gain = settings.pointerSpeed * (0.6 + min(speed / 0.6, 2.4))
+        let width = Double(Input.mainScreenSize.width)
+        let from = Input.mouseLocation
+        let b = Input.desktopBounds
+        let to = CGPoint(x: min(max(from.x + dx * width * gain, b.minX), b.maxX - 1),
+                         y: min(max(from.y + dy * width * gain, b.minY), b.maxY - 1))
+        aimTrail.append((now, to))
         aimTrail.removeAll { now - $0.t > 0.5 }
-        if mouseDown { Input.mouse(.leftMouseDragged, at: cursorPosition) } else { Input.moveCursor(to: cursorPosition) }
+        if mouseDown { Input.mouse(.leftMouseDragged, at: to) } else { Input.moveCursor(to: to) }
+        ring.move(to: to)
     }
 
     /// An on-screen confirmation from outside the gesture pipeline (e.g. the on/off shortcut).

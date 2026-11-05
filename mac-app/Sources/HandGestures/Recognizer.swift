@@ -12,7 +12,8 @@ struct Hand {
 enum GestureEvent: Equatable {
     case wake, sleep
     case gesture(GestureRule)  // a hold or swipe with a one-off action
-    case aim(CGPoint)          // 0...1 position the pointer follows
+    case engage, release       // the hand picked up / let go of the pointer
+    case aim(CGPoint)          // while holding the pointer: the palm's 0...1 position; the pointer moves by its change
     case pinchDown             // fingers closed: hold the pointer where it was aimed
     case click(Int)            // released without moving: 1 = click, 2 = double-click
     case rightClick            // held still: more options
@@ -26,8 +27,9 @@ enum GestureEvent: Equatable {
 
 /// Turns a stream of per-frame hands into gesture events.
 ///
-/// Built in, like a trackpad: a relaxed or pointing hand aims the pointer; a pinch
-/// clicks, twice double-clicks, held still right-clicks, moved drags; both hands
+/// Built in, like a mouse: point and hold a beat to pick up the pointer, move the
+/// hand to move it, lower the hand or change shape to let go. While holding it, a
+/// pinch clicks, twice double-clicks, held still right-clicks, moved drags. Both hands
 /// pinching zoom. Everything else follows the user's gesture list (holds, swipes,
 /// scroll, volume). Pure logic, so it is testable.
 final class Recognizer {
@@ -43,16 +45,19 @@ final class Recognizer {
     let pinchRelease = 0.5      // …and as apart again above this
     let dragThreshold = 0.025   // frame fraction the pinch travels before it becomes a drag
     let doubleClickWindow = 0.45
+    let engageDwell = 0.25      // seconds the pointing hand is held still before it picks up the pointer
+    let releaseGrace = 0.35     // seconds of another shape before the pointer is let go
     let zoomStep = 1.15         // spread ratio per zoom step
 
-    /// Shapes that aim the pointer: a relaxed hand, pointing, or about to pinch.
-    static let aimPoses: Set<Pose> = [.none, .point, .pinch]
 
     private(set) var awake = false
     private(set) var pose: Pose = .none
     private(set) var pinched = false
     private(set) var dragging = false
     private(set) var zooming = false
+    /// The hand is holding the pointer.
+    private(set) var engaged = false
+    private var lastPointerShape = 0.0
 
     // Lookups built from the gesture list; the first rule wins when two clash.
     private var wakePose: Pose = .openPalm
@@ -76,7 +81,7 @@ final class Recognizer {
     private var closeFrames = 0
     private var openFrames = 0
     private var pinchStartT = 0.0
-    private var pinchStartPoint = CGPoint.zero
+    private var pinchStartPoint = CGPoint.zero    // palm centre when the pinch closed
     private var rightClicked = false
     private var pinchSpent = false          // after a zoom, fingers must open before the next click
     private var lastClick: (t: Double, p: CGPoint)?
@@ -147,6 +152,10 @@ final class Recognizer {
         pinched = false; dragging = false; closeFrames = 0
     }
 
+    private func releasePointer(_ events: inout [GestureEvent]) {
+        if engaged { engaged = false; events.append(.release) }
+    }
+
     private func endZoom(_ events: inout [GestureEvent]) {
         if zooming { zooming = false; pinchSpent = true; events.append(.zoomEnd) }
         zoomCandidateSince = nil
@@ -154,6 +163,7 @@ final class Recognizer {
 
     private func goToSleep(_ events: inout [GestureEvent]) {
         cancelPinch(&events)
+        releasePointer(&events)
         endZoom(&events)
         awake = false
         events.append(.sleep)
@@ -183,11 +193,14 @@ final class Recognizer {
     // MARK: Update
 
     /// `other` is a second hand in view, used for both-hands start / stop and zoom.
-    func update(t: Double, hand: Hand?, other: Hand? = nil) -> [GestureEvent] {
+    /// `typing` is true just after a key press: hands are ignored, like a trackpad
+    /// ignoring your palm while you type.
+    func update(t: Double, hand: Hand?, other: Hand? = nil, typing: Bool = false) -> [GestureEvent] {
         var events: [GestureEvent] = []
 
         guard let hand else {
             cancelPinch(&events)      // never leave the mouse button held down
+            releasePointer(&events)
             endZoom(&events)
             if awake, let seen = lastSeen, t - seen > settings.sleepAfterSeconds { goToSleep(&events) }
             if pose != .none { setPose(.none, t, nil) }
@@ -213,6 +226,13 @@ final class Recognizer {
             return events
         }
         guard awake else { return events }
+
+        if typing {
+            cancelPinch(&events)
+            releasePointer(&events)
+            endZoom(&events)
+            return events
+        }
 
         // Two hands pinching: expand / shrink by pulling apart / pushing together.
         if settings.twoHandZoom, let other {
@@ -268,7 +288,7 @@ final class Recognizer {
                     return events
                 }
                 if !dragging && !rightClicked {
-                    if Self.distance(hand.pinchPoint, pinchStartPoint) > dragThreshold {
+                    if Self.distance(hand.center, pinchStartPoint) > dragThreshold {
                         dragging = true
                         events.append(.dragStart)
                     } else if t - pinchStartT >= settings.rightClickSeconds {
@@ -276,13 +296,17 @@ final class Recognizer {
                         events.append(.rightClick)
                     }
                 }
-                if dragging { events.append(.aim(hand.pinchPoint)) }
+                lastPointerShape = t
+                if engaged { events.append(.aim(hand.center)) }
                 return events
             }
             // Fingers closing: two frames in a row of a real pinch (not an OK sign or a fist).
             // If the other hand is pinching too, it's the start of a two-hand zoom, not a click.
             let otherPinching = settings.twoHandZoom && other.map { $0.pose == .pinch && $0.pinch < pinchClose } == true
-            closeFrames = (hand.pose == .pinch && hand.pinch < pinchClose && !pinchSpent && !otherPinching) ? closeFrames + 1 : 0
+            // With the hand pointer on, only a hand holding the pointer can click.
+            let mayClick = engaged || !settings.handPointer
+            closeFrames = (mayClick && hand.pose == .pinch && hand.pinch < pinchClose && !pinchSpent && !otherPinching)
+                ? closeFrames + 1 : 0
             if closeFrames >= 2 {
                 pinched = true
                 dragging = false
@@ -290,15 +314,34 @@ final class Recognizer {
                 openFrames = 0
                 closeFrames = 0
                 pinchStartT = t
-                pinchStartPoint = hand.pinchPoint
+                pinchStartPoint = hand.center
+                lastPointerShape = t
                 events.append(.pinchDown)
                 return events
             }
         }
 
-        // Aim: a relaxed or pointing hand moves the pointer.
-        if settings.handPointer && Self.aimPoses.contains(pose) && Self.aimPoses.contains(hand.pose) {
-            events.append(.aim(hand.pinchPoint))
+        // The pointer: point and hold a beat to pick it up; it then follows the palm
+        // (so pinching doesn't move it) until the hand changes shape for a moment.
+        if settings.handPointer {
+            let pointing = hand.pose == .point || hand.pose == .pinch
+            if engaged {
+                if pointing { lastPointerShape = t }
+                if t - lastPointerShape > releaseGrace {
+                    releasePointer(&events)
+                } else {
+                    events.append(.aim(hand.center))
+                    return events     // holding the pointer: no other gestures
+                }
+            } else if pose == .point && held >= engageDwell {
+                engaged = true
+                lastPointerShape = t
+                events.append(.engage)
+                events.append(.aim(hand.center))
+                return events
+            }
+        } else {
+            releasePointer(&events)
         }
 
         if t < cooldownUntil { return events }
