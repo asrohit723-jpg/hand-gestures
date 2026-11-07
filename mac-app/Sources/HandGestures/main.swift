@@ -71,8 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            if let w = popover.contentViewController?.view.window {
+                w.collectionBehavior.formUnion(Self.overFullScreen)    // also over a full-screen app
+                w.makeKey()
+            }
         }
     }
 
@@ -141,18 +145,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         present(welcomeWindow!)
     }
 
+    /// Windows open on the Space you're looking at, even over an app in full screen,
+    /// instead of on a desktop out of sight (or macOS switching you away to show them).
+    static let overFullScreen: NSWindow.CollectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+
     private func makeWindow<V: View>(title: String, view: V) -> NSWindow {
         let w = NSWindow(contentViewController: NSHostingController(rootView: view))
         w.title = title
         w.styleMask = [.titled, .closable, .miniaturizable]
+        w.collectionBehavior = Self.overFullScreen
         w.isReleasedWhenClosed = false
         w.center()
         return w
     }
 
     private func present(_ w: NSWindow) {
+        if w.isMiniaturized { w.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
+        w.orderFrontRegardless()
     }
 
     /// App menu for when the app shows in the Dock: Settings, Close, Quit.
