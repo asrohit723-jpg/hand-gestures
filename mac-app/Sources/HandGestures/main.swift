@@ -70,6 +70,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
+        } else if FullScreen.frontAppIsFullScreen() {
+            // Over a full-screen app the dropdown would make macOS leave that Space for the
+            // desktop, so the same controls open in the Hand Gestures panel, under the icon.
+            if controlWindow?.isVisible == true { controlWindow?.close(); return }
+            showControlWindow()
+            if let w = controlWindow, let bar = button.window {
+                let icon = bar.convertToScreen(button.convert(button.bounds, to: nil))
+                let right = (bar.screen ?? NSScreen.main)?.visibleFrame.maxX ?? icon.maxX
+                w.setFrameTopLeftPoint(NSPoint(x: min(icon.minX, right - w.frame.width - 8), y: icon.minY - 6))
+            }
         } else {
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -149,21 +159,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// instead of on a desktop out of sight (or macOS switching you away to show them).
     static let overFullScreen: NSWindow.CollectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
 
+    /// A panel that can take clicks and typing without making Hand Gestures the active app,
+    /// so it can be used on top of an app in full screen without macOS leaving that Space.
     private func makeWindow<V: View>(title: String, view: V) -> NSWindow {
-        let w = NSWindow(contentViewController: NSHostingController(rootView: view))
+        let w = AppPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                         styleMask: [.titled, .closable, .miniaturizable, .nonactivatingPanel],
+                         backing: .buffered, defer: false)
+        w.contentViewController = NSHostingController(rootView: view)
         w.title = title
-        w.styleMask = [.titled, .closable, .miniaturizable]
         w.collectionBehavior = Self.overFullScreen
+        w.hidesOnDeactivate = false
         w.isReleasedWhenClosed = false
         w.center()
         return w
     }
 
+    /// On the desktop: an ordinary window, and Hand Gestures becomes the active app.
+    /// Over a full-screen app: float on top of it without activating — activating a Dock app
+    /// there makes macOS switch to the desktop, so the window looked like it opened and closed.
     private func present(_ w: NSWindow) {
         if w.isMiniaturized { w.deminiaturize(nil) }
-        NSApp.activate(ignoringOtherApps: true)
-        w.makeKeyAndOrderFront(nil)
-        w.orderFrontRegardless()
+        if FullScreen.frontAppIsFullScreen() {
+            w.level = .floating
+            w.orderFrontRegardless()
+            w.makeKey()
+        } else {
+            w.level = .normal
+            NSApp.activate(ignoringOtherApps: true)
+            w.makeKeyAndOrderFront(nil)
+        }
     }
 
     /// App menu for when the app shows in the Dock: Settings, Close, Quit.
@@ -179,6 +203,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "Quit Hand Gestures", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         return main
+    }
+}
+
+final class AppPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+enum FullScreen {
+    /// Whether the app in front (not this one) is showing a window in full screen.
+    /// Asked through Accessibility, which Hand Gestures already has to press keys.
+    static func frontAppIsFullScreen() -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              front.processIdentifier != getpid() else { return false }
+        guard AXIsProcessTrusted() else { return fillsAScreen(front.processIdentifier) }
+        let app = AXUIElementCreateApplication(front.processIdentifier)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focused) == .success,
+              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, "AXFullScreen" as CFString, &value) == .success
+        else { return false }
+        return (value as? Bool) == true
+    }
+
+    /// Without Accessibility: a window of that app spans a whole screen's width, from the top
+    /// (or just under the menu bar) to the bottom edge, as a full-screen window does.
+    private static func fillsAScreen(_ pid: pid_t) -> Bool {
+        guard let primary = NSScreen.screens.first?.frame,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return false }
+        // Window bounds count down from the top of the main screen; NSScreen frames count up.
+        let screens = NSScreen.screens.map { s in
+            CGRect(x: s.frame.minX, y: primary.maxY - s.frame.maxY, width: s.frame.width, height: s.frame.height)
+        }
+        return list.contains { w in
+            guard (w[kCGWindowOwnerPID as String] as? pid_t) == pid, (w[kCGWindowLayer as String] as? Int) == 0,
+                  let b = w[kCGWindowBounds as String] as? NSDictionary,
+                  let r = CGRect(dictionaryRepresentation: b) else { return false }
+            return screens.contains { f in
+                abs(r.minX - f.minX) < 1 && abs(r.width - f.width) < 1 && abs(r.maxY - f.maxY) < 1
+                    && r.minY - f.minY < 40
+            }
+        }
     }
 }
 
