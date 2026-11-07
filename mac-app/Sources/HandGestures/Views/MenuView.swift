@@ -145,9 +145,9 @@ struct CheatSheet: View {
                 row("👇", "Lower your hand", "Let go of the pointer")
             }
             if settings.pinchGrab {
-                row("🤏", "Pinch", "Click")
-                row("🤏", "Pinch twice", "Double-click")
-                row("🤏", "Pinch and hold still", "Right-click")
+                row("🤏", "Pinch thumb and index", "Click")
+                row("🤏", "Pinch twice", "Double-click (open)")
+                row("🤏", "Thumb to middle finger", "Right-click")
                 row("🤏", "Pinch and move", "Drag")
             }
             if settings.twoHandZoom {

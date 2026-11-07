@@ -244,7 +244,7 @@ final class AppState: ObservableObject {
         let now = CACurrentMediaTime()
         let minCutoff = max(0.3, 2.5 * (1 - settings.pointerSmoothing))
         filterX.minCutoff = minCutoff; filterY.minCutoff = minCutoff
-        filterX.beta = 8; filterY.beta = 8          // palm units are 0...1 of the frame
+        filterX.beta = 14; filterY.beta = 14        // palm units are 0...1 of the frame; opens up quickly when moving
         guard let base = handBase else {
             filterX.reset(to: Double(p.x)); filterY.reset(to: Double(p.y))
             handBase = p
@@ -254,13 +254,16 @@ final class AppState: ObservableObject {
         let hand = CGPoint(x: filterX.filter(Double(p.x), at: now), y: filterY.filter(Double(p.y), at: now))
         let dx = Double(hand.x - base.x), dy = Double(hand.y - base.y)
         let distance = hypot(dx, dy)
-        guard !frozen, distance > 0.0015 else { return }    // a resting hand's wobble builds up instead of moving
+        guard !frozen, distance > 0.0008 else { return }    // a resting hand's wobble builds up instead of moving
         let speed = distance / max(now - lastAim, 1.0 / 60)
         handBase = hand
         lastAim = now
 
-        // Acceleration: about 0.6x the screen width per frame-width at a slow move, up to 3x when quick.
-        let gain = settings.pointerSpeed * (0.6 + min(speed / 0.6, 2.4))
+        // Acceleration, like a trackpad: a slow move (under 5% of the frame a second) is precise,
+        // about 2x the screen width per frame width; it eases up to 8x for a quick move (80%/s).
+        // A normal move crosses the screen with the hand travelling about a quarter of the frame.
+        let quick = min(max((speed - 0.05) / 0.75, 0), 1)
+        let gain = settings.pointerSpeed * (2.2 + 5.8 * quick * quick * (3 - 2 * quick))
         let width = Double(Input.mainScreenSize.width)
         let from = Input.mouseLocation
         let b = Input.desktopBounds

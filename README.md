@@ -14,9 +14,9 @@ The app copies what people already know: the trackpad and Vision Pro.
 | ☝️ Point and hold still a moment | Pick up the pointer (a ring appears) |
 | ☝️ Point and move | Move the pointer, like a mouse: slow = precise, quick = far |
 | 👇 Lower your hand or change shape | Let go (the pointer stays put) |
-| 🤏 Pinch, while holding the pointer | Click |
-| 🤏 Pinch twice | Double-click |
-| 🤏 Pinch and hold still | Right-click |
+| 🤏 Pinch thumb and index, while holding the pointer | Click (however long you hold it) |
+| 🤏 Pinch twice | Double-click (opens files and apps) |
+| Thumb to middle finger, index still up | Right-click |
 | 🤏 Pinch and move | Drag (files, windows, across screens) |
 | 🤏🤏 Both hands pinch, apart / together | Zoom in / out (or resize the window) |
 | ✌️ Two fingers, move up / down | Scroll |

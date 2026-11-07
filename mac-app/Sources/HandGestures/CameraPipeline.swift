@@ -138,7 +138,8 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             let cy = palmIdx.map { Double(j[$0].y) }.reduce(0, +) / 5
             return Hand(pose: sure ? PoseClassifier.classify(scaled) : .none, center: CGPoint(x: cx, y: cy), tip: j[8],
                         pinch: PoseClassifier.pinchRatio(scaled),
-                        pinchPoint: CGPoint(x: (j[4].x + j[8].x) / 2, y: (j[4].y + j[8].y) / 2))
+                        pinchPoint: CGPoint(x: (j[4].x + j[8].x) / 2, y: (j[4].y + j[8].y) / 2),
+                        middlePinch: PoseClassifier.middlePinchRatio(scaled))
         }
         // The hand doing single-hand gestures stays the same one from frame to frame.
         if hands.count > 1, let last = lastPrimary {

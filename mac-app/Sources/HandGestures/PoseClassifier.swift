@@ -38,6 +38,17 @@ enum PoseClassifier {
         return palm > 1e-6 ? dist(p[4], p[8]) / palm : .infinity
     }
 
+    /// Thumb tip to middle tip, in palm lengths, while the index finger stays up and the
+    /// middle finger reaches out to meet the thumb. Small = the right-click pinch.
+    /// Infinite otherwise: in a plain point the thumb rests on the curled middle finger,
+    /// and in a fist the index is curled too; neither may right-click.
+    static func middlePinchRatio(_ p: [P]) -> Double {
+        guard p.count == 21 else { return .infinity }
+        let palm = dist(p[9], p[0])
+        guard palm > 1e-6, fingerExtended(p, fingers[0]), dist(p[12], p[0]) > dist(p[9], p[0]) else { return .infinity }
+        return dist(p[4], p[12]) / palm
+    }
+
     static func classify(_ p: [P]) -> Pose {
         guard p.count == 21 else { return .none }
         let palm = dist(p[9], p[0])

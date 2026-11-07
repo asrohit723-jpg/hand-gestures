@@ -299,9 +299,9 @@ struct Settings: Codable, Equatable {
     var showPointerRing = true
     /// Ignore hands for a moment after a key press, like a trackpad ignoring your palm.
     var pauseWhileTyping = true
-    /// Pinch to click; pinch twice to double-click; pinch and hold to right-click; pinch and move to drag.
+    /// Pinch to click; pinch twice to double-click; pinch and move to drag; thumb to middle finger to right-click.
     var pinchGrab = true
-    var rightClickSeconds = 0.6
+    var rightClickSeconds = 0.6     // unused since right-click became thumb to middle finger; kept so old settings load
     var dragSpeed = 1.0
     /// Pinch with both hands and pull apart / push together.
     var twoHandZoom = true

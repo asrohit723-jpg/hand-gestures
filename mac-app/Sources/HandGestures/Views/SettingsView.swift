@@ -223,11 +223,7 @@ struct PointerPane: View {
             Section("Clicking") {
                 Toggle(isOn: $state.settings.pinchGrab) {
                     Text("🤏  Pinch to click")
-                    Text("While you hold the pointer: pinch to click, pinch twice to double-click, pinch and move to drag pictures, files or windows.")
-                }
-                if state.settings.pinchGrab {
-                    SliderRow(title: "Pinch and hold to right-click", value: $state.settings.rightClickSeconds,
-                              range: 0.4...1.2, low: "Quick", high: "Long", format: "%.1f s")
+                    Text("While you hold the pointer, touch thumb and index: once to click, twice to double-click and open, pinch and move to drag pictures, files or windows. Touch thumb and middle finger, index still up, to right-click.")
                 }
             }
 

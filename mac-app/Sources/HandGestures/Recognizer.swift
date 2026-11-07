@@ -7,6 +7,7 @@ struct Hand {
     var tip: CGPoint      // index fingertip
     var pinch: Double = .infinity       // thumb tip to index tip, in palm lengths
     var pinchPoint: CGPoint = .zero     // between the thumb and index tips
+    var middlePinch: Double = .infinity // thumb tip to middle tip, in palm lengths (index up)
 }
 
 enum GestureEvent: Equatable {
@@ -16,7 +17,7 @@ enum GestureEvent: Equatable {
     case aim(CGPoint)          // while holding the pointer: the palm's 0...1 position; the pointer moves by its change
     case pinchDown             // fingers closed: hold the pointer where it was aimed
     case click(Int)            // released without moving: 1 = click, 2 = double-click
-    case rightClick            // held still: more options
+    case rightClick            // thumb to middle finger: more options
     case dragStart, dragEnd    // moved while pinched: mouse down … mouse up; .aim moves it between
     case scroll(Double)        // pixels; positive scrolls up (the content moves down)
     case volume(Int)           // +1 / -1
@@ -29,7 +30,8 @@ enum GestureEvent: Equatable {
 ///
 /// Built in, like a mouse: point and hold a beat to pick up the pointer, move the
 /// hand to move it, lower the hand or change shape to let go. While holding it, a
-/// pinch clicks, twice double-clicks, held still right-clicks, moved drags. Both hands
+/// pinch clicks (however long it's held), twice double-clicks, moved drags; thumb to
+/// middle finger right-clicks, like a two-finger click on the trackpad. Both hands
 /// pinching zoom. Everything else follows the user's gesture list (holds, swipes,
 /// scroll, volume). Pure logic, so it is testable.
 final class Recognizer {
@@ -43,8 +45,8 @@ final class Recognizer {
     let scrollNoise = 0.002     // frame fraction per frame below which a resting hand doesn't scroll
     let pinchClose = 0.3        // palm lengths: fingers count as touching below this…
     let pinchRelease = 0.5      // …and as apart again above this
-    let dragThreshold = 0.025   // frame fraction the pinch travels before it becomes a drag
-    let doubleClickWindow = 0.45
+    let dragThreshold = 0.045   // frame fraction the pinch travels before it becomes a drag
+    let doubleClickWindow = 0.7 // seconds between the two releases of a double pinch
     let engageDwell = 0.25      // seconds the pointing hand is held still before it picks up the pointer
     let releaseGrace = 0.35     // seconds of another shape before the pointer is let go
     let zoomStep = 1.15         // spread ratio per zoom step
@@ -80,9 +82,9 @@ final class Recognizer {
     // Pinch.
     private var closeFrames = 0
     private var openFrames = 0
-    private var pinchStartT = 0.0
     private var pinchStartPoint = CGPoint.zero    // palm centre when the pinch closed
-    private var rightClicked = false
+    private var rightFrames = 0
+    private var rightSpent = false          // after a right-click, the middle finger must lift first
     private var pinchSpent = false          // after a zoom, fingers must open before the next click
     private var lastClick: (t: Double, p: CGPoint)?
 
@@ -213,6 +215,7 @@ final class Recognizer {
         if hand.pose != pose && t - rawSince >= poseDebounce { setPose(hand.pose, t, hand) }
         let held = heldFor(t, hand)
         if hand.pinch > pinchRelease { pinchSpent = false }
+        if hand.middlePinch > pinchRelease { rightSpent = false }
 
         // Start / stop: its shape held still — on both hands, unless set to one.
         if settings.startStopBothHands {
@@ -268,7 +271,7 @@ final class Recognizer {
             endZoom(&events)
         }
 
-        // Pinch: click, double-click, right-click (held still) or drag (moved).
+        // Pinch: click, double-click or drag (moved). Holding it longer is still a click.
         if settings.pinchGrab {
             if pinched {
                 openFrames = hand.pinch > pinchRelease ? openFrames + 1 : 0
@@ -278,7 +281,7 @@ final class Recognizer {
                     if dragging {
                         dragging = false
                         events.append(.dragEnd)
-                    } else if !rightClicked {
+                    } else {
                         let double = lastClick.map {
                             t - $0.t < doubleClickWindow && Self.distance($0.p, pinchStartPoint) < 0.05
                         } ?? false
@@ -287,14 +290,9 @@ final class Recognizer {
                     }
                     return events
                 }
-                if !dragging && !rightClicked {
-                    if Self.distance(hand.center, pinchStartPoint) > dragThreshold {
-                        dragging = true
-                        events.append(.dragStart)
-                    } else if t - pinchStartT >= settings.rightClickSeconds {
-                        rightClicked = true
-                        events.append(.rightClick)
-                    }
+                if !dragging && Self.distance(hand.center, pinchStartPoint) > dragThreshold {
+                    dragging = true
+                    events.append(.dragStart)
                 }
                 lastPointerShape = t
                 if engaged { events.append(.aim(hand.center)) }
@@ -305,15 +303,28 @@ final class Recognizer {
             let otherPinching = settings.twoHandZoom && other.map { $0.pose == .pinch && $0.pinch < pinchClose } == true
             // With the hand pointer on, only a hand holding the pointer can click.
             let mayClick = engaged || !settings.handPointer
+
+            // Thumb to middle finger, index still up: right-click. The middle tip must be the
+            // one touching, well closer to the thumb than the index tip.
+            let middleTouch = hand.middlePinch < pinchClose && hand.pinch > max(pinchClose, 2 * hand.middlePinch)
+            rightFrames = (mayClick && middleTouch && !rightSpent)
+                ? rightFrames + 1 : 0
+            if rightFrames >= 2 {
+                rightFrames = 0
+                rightSpent = true
+                closeFrames = 0
+                lastPointerShape = t
+                events.append(.pinchDown)
+                events.append(.rightClick)
+                return events
+            }
             closeFrames = (mayClick && hand.pose == .pinch && hand.pinch < pinchClose && !pinchSpent && !otherPinching)
                 ? closeFrames + 1 : 0
             if closeFrames >= 2 {
                 pinched = true
                 dragging = false
-                rightClicked = false
                 openFrames = 0
                 closeFrames = 0
-                pinchStartT = t
                 pinchStartPoint = hand.center
                 lastPointerShape = t
                 events.append(.pinchDown)
@@ -324,7 +335,7 @@ final class Recognizer {
         // The pointer: point and hold a beat to pick it up; it then follows the palm
         // (so pinching doesn't move it) until the hand changes shape for a moment.
         if settings.handPointer {
-            let pointing = hand.pose == .point || hand.pose == .pinch
+            let pointing = hand.pose == .point || hand.pose == .pinch || hand.middlePinch < pinchRelease
             if engaged {
                 if pointing { lastPointerShape = t }
                 if t - lastPointerShape > releaseGrace {

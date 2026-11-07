@@ -11,14 +11,15 @@ final class RecognizerTests: XCTestCase {
 
         @discardableResult
         func frames(_ pose: Pose?, _ seconds: Double, from a: CGPoint = CGPoint(x: 0.5, y: 0.5), to b: CGPoint? = nil,
-                    typing: Bool = false) -> Driver {
+                    typing: Bool = false, middle: Bool = false) -> Driver {
             let end = b ?? a
             let n = max(1, Int(seconds * 30))
             for i in 0..<n {
                 let f = Double(i) / Double(max(1, n - 1))
                 let c = CGPoint(x: a.x + (end.x - a.x) * f, y: a.y + (end.y - a.y) * f)
                 let hand = pose.map { Hand(pose: $0, center: c, tip: CGPoint(x: c.x, y: c.y - 0.1),
-                                           pinch: $0 == .pinch ? 0.1 : .infinity, pinchPoint: c) }
+                                           pinch: $0 == .pinch ? 0.1 : .infinity, pinchPoint: c,
+                                           middlePinch: middle ? 0.1 : .infinity) }
                 events += rec.update(t: t, hand: hand, typing: typing)
                 t += 1.0 / 30
             }
@@ -191,8 +192,35 @@ final class RecognizerTests: XCTestCase {
         XCTAssertEqual(d.discrete, ["pinchDown", "click1", "pinchDown", "click1"])
     }
 
-    func testPinchAndHoldRightClicks() {
-        XCTAssertEqual(Driver().holdingPointer().frames(.pinch, 1).frames(.point, 0.2).discrete, ["pinchDown", "rightClick"])
+    func testAnOrdinaryDoublePinchDoubleClicks() {
+        // A relaxed double pinch: each pinch a quarter second, a quarter second apart.
+        let d = Driver().holdingPointer().frames(.pinch, 0.25).frames(.point, 0.25).frames(.pinch, 0.25).frames(.point, 0.2)
+        XCTAssertEqual(d.discrete, ["pinchDown", "click1", "pinchDown", "click2"])
+    }
+
+    func testALongPinchIsStillALeftClick() {
+        // Holding the pinch must never turn into a right-click.
+        XCTAssertEqual(Driver().holdingPointer().frames(.pinch, 1.5).frames(.point, 0.2).discrete, ["pinchDown", "click1"])
+    }
+
+    func testASmallDriftWhilePinchingStillClicks() {
+        let d = Driver().holdingPointer()
+            .frames(.pinch, 0.3, from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.53, y: 0.51))
+            .frames(.point, 0.2, from: CGPoint(x: 0.53, y: 0.51))
+        XCTAssertEqual(d.discrete, ["pinchDown", "click1"])
+    }
+
+    func testThumbToMiddleFingerRightClicksOnce() {
+        let d = Driver().holdingPointer().frames(.point, 0.6, middle: true).frames(.point, 0.3)
+        XCTAssertEqual(d.discrete, ["pinchDown", "rightClick"])
+        // Lifting the middle finger and touching again right-clicks again.
+        d.events.removeAll()
+        d.frames(.point, 0.3, middle: true)
+        XCTAssertEqual(d.discrete, ["pinchDown", "rightClick"])
+    }
+
+    func testThumbToMiddleFingerWithoutThePointerDoesNothing() {
+        XCTAssertEqual(Driver().wake().frames(Pose.none, 0.5, middle: true).discrete, [])
     }
 
     func testPinchAndMoveDrags() {
@@ -382,5 +410,17 @@ final class RecognizerTests: XCTestCase {
             (.none, hand([], relaxed: true)),   // a relaxed, half-curled hand is not a fist
         ]
         for (expected, pts) in cases { XCTAssertEqual(PoseClassifier.classify(pts), expected, "\(expected)") }
+
+        // Right-click: thumb meets the middle fingertip reaching out, index still up.
+        var middle = hand([0])
+        middle[10] = P(0.5, 0.52); middle[11] = P(0.49, 0.5); middle[12] = P(0.47, 0.53)
+        middle[3] = P(0.42, 0.6); middle[4] = P(0.465, 0.545)
+        XCTAssertLessThan(PoseClassifier.middlePinchRatio(middle), 0.3)
+        XCTAssertEqual(PoseClassifier.classify(middle), .point)       // keeps holding the pointer
+        XCTAssertGreaterThan(PoseClassifier.pinchRatio(middle), 0.3)  // and isn't a left-click
+        // A plain point (thumb resting on the curled middle finger), a fist and an open palm never are.
+        for (name, pts) in [("point", hand([0])), ("fist", hand([])), ("palm", hand([0, 1, 2, 3], thumb: "out"))] {
+            XCTAssertGreaterThan(PoseClassifier.middlePinchRatio(pts), 0.5, name)
+        }
     }
 }
